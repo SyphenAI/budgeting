@@ -76,7 +76,7 @@ ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
 BRAND = ROOT / "brand"
 
-app = FastAPI(title="Family Budget", version="0.1.0")
+app = FastAPI(title="Household Money", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -992,6 +992,41 @@ def create_member(
         role=row.role,
         must_change_password=bool(row.must_change_password),
     )
+
+
+@app.delete("/api/members/{member_id}")
+def delete_member(
+    member_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a login from this local install."""
+    if user.role not in ("owner", "admin", "partner"):
+        raise HTTPException(status_code=403, detail="Only owners/partners can remove people")
+    if member_id == user.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own login while signed in")
+
+    target = db.get(User, member_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Keep at least one owner/admin so the household is not locked out
+    owners = (
+        db.query(User)
+        .filter(User.role.in_(("owner", "admin")))
+        .count()
+    )
+    if target.role in ("owner", "admin") and owners <= 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot delete the last owner account",
+        )
+
+    # Drop their sessions so they are signed out
+    db.query(SessionToken).filter(SessionToken.user_id == target.id).delete()
+    db.delete(target)
+    db.commit()
+    return {"ok": True, "deleted_id": member_id}
 
 
 # ── Pay stubs (PDF) + job pay profiles ────────────────────────────

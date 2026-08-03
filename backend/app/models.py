@@ -121,7 +121,7 @@ class JobPay(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     household_id: Mapped[int] = mapped_column(ForeignKey("households.id"), index=True)
     employer: Mapped[str] = mapped_column(String(120), default="")
-    employee_label: Mapped[str] = mapped_column(String(120), default="")  # e.g. Mom
+    employee_label: Mapped[str] = mapped_column(String(120), default="")  # optional person label
     frequency: Mapped[str] = mapped_column(String(32), default="biweekly")
     gross_pay: Mapped[float] = mapped_column(Float, default=0.0)
     net_pay: Mapped[float] = mapped_column(Float, default=0.0)

@@ -1,4 +1,4 @@
-/* Family Budget — frontend */
+/* Household Money — frontend */
 (() => {
   const IDLE_MS = 10 * 60 * 1000; // 10 minutes — local shared-PC safety
 
@@ -1090,21 +1090,43 @@
     $("#hh-name").value = hh.name;
     $("#hh-balance").value = hh.starting_balance;
     const list = $("#members-list");
+    const meName = (state.user && (state.user.username || "")).toLowerCase();
     if (list) {
       list.innerHTML = members
-        .map(
-          (m) => `<div style="display:flex;justify-content:space-between;align-items:center;padding:0.45rem 0;border-bottom:1px solid var(--border)">
+        .map((m) => {
+          const isMe = (m.username || "").toLowerCase() === meName;
+          const delBtn = isMe
+            ? `<span class="text-muted" style="font-size:0.75rem">you</span>`
+            : `<button class="btn btn-danger btn-sm" type="button" data-member-del="${m.id}" data-member-name="${escapeAttr(m.display_name || m.username)}">Delete</button>`;
+          return `<div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
           <div>
             <strong class="text-primary">${escapeHtml(m.display_name)}</strong>
             <span class="text-muted" style="font-size:0.8rem"> · @${escapeHtml(m.username)}</span>
             <div style="margin-top:0.25rem">
               <span class="chip chip-info">${escapeHtml(roleLabel(m.role))}</span>
               ${m.must_change_password ? `<span class="chip chip-warning">must change password</span>` : ""}
+              ${isMe ? `<span class="chip chip-brand">signed in</span>` : ""}
             </div>
           </div>
-        </div>`
-        )
+          <div>${delBtn}</div>
+        </div>`;
+        })
         .join("") || `<p class="text-muted">No members</p>`;
+
+      list.querySelectorAll("[data-member-del]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const name = btn.dataset.memberName || "this user";
+          if (!confirm(`Delete login “${name}”? They will no longer be able to sign in on this computer.`)) {
+            return;
+          }
+          try {
+            await api(`/api/members/${btn.dataset.memberDel}`, { method: "DELETE" });
+            await refreshSettings();
+          } catch (ex) {
+            alert(ex.message || "Could not delete user");
+          }
+        });
+      });
     }
   }
 
