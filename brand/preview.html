@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Syphen Brand Preview — Budget App</title>
+  <link rel="icon" type="image/png" href="assets/logo_icon.png" />
+  <link rel="stylesheet" href="syphen-base.css" />
+  <style>
+    .swatch-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 0.75rem;
+      margin-top: 1rem;
+    }
+    .swatch {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--bg-dark-2);
+    }
+    .swatch-color { height: 56px; }
+    .swatch-meta {
+      padding: 0.55rem 0.65rem;
+      font-size: 0.72rem;
+      color: var(--text-secondary);
+    }
+    .swatch-meta strong {
+      display: block;
+      color: var(--text-primary);
+      font-size: 0.78rem;
+      margin-bottom: 0.15rem;
+    }
+    .preview-section { margin-bottom: 2.5rem; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 0.65rem; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <header class="app-nav">
+    <div class="app-nav-inner">
+      <a class="app-logo" href="#">
+        <img src="assets/logo_icon_transparent.png" alt="Syphen" />
+        <span>Family Budget <span class="brand-dot">·</span> Preview</span>
+      </a>
+      <ul class="app-nav-links">
+        <li><a class="active" href="#">Dashboard</a></li>
+        <li><a href="#">Budget</a></li>
+        <li><a href="#">Transactions</a></li>
+        <li><a href="#">Household</a></li>
+      </ul>
+      <button class="btn btn-primary btn-sm" type="button">Add expense</button>
+    </div>
+  </header>
+
+  <main id="main" class="container-app" style="padding-top: 2rem; padding-bottom: 4rem;">
+    <div class="preview-section">
+      <span class="section-label">Brand kit</span>
+      <h1>Syphen styles for the budget app</h1>
+      <p style="max-width: 620px; margin-top: 0.75rem;">
+        Tokens and components pulled from <a href="https://syphen.ai" target="_blank" rel="noopener">syphen.ai</a>.
+        Dark shell, brand red, system fonts — ready before feature work starts.
+      </p>
+    </div>
+
+    <div class="preview-section">
+      <h2>Color tokens</h2>
+      <div class="swatch-grid">
+        <div class="swatch"><div class="swatch-color" style="background:#C8102E"></div><div class="swatch-meta"><strong>--brand</strong>#C8102E</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#a00d24"></div><div class="swatch-meta"><strong>--brand-hover</strong>#a00d24</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#f08080"></div><div class="swatch-meta"><strong>--brand-light</strong>#f08080</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#0d1117"></div><div class="swatch-meta"><strong>--bg-dark</strong>#0d1117</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#161b22"></div><div class="swatch-meta"><strong>--bg-dark-2</strong>#161b22</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#1c2333"></div><div class="swatch-meta"><strong>--bg-dark-3</strong>#1c2333</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#e6edf3"></div><div class="swatch-meta"><strong>--text-primary</strong>#e6edf3</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#8b949e"></div><div class="swatch-meta"><strong>--text-secondary</strong>#8b949e</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#3fb950"></div><div class="swatch-meta"><strong>--success</strong>#3fb950</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#d29922"></div><div class="swatch-meta"><strong>--warning</strong>#d29922</div></div>
+        <div class="swatch"><div class="swatch-color" style="background:#f85149"></div><div class="swatch-meta"><strong>--danger</strong>#f85149</div></div>
+      </div>
+    </div>
+
+    <div class="preview-section">
+      <h2>Stats</h2>
+      <div class="grid-4" style="margin-top: 1rem;">
+        <div class="stat">
+          <div class="stat-label">Income</div>
+          <div class="stat-value positive">$4,200</div>
+          <div class="stat-hint">This month</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Expenses</div>
+          <div class="stat-value negative">$3,150</div>
+          <div class="stat-hint">75% of budget</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Left to spend</div>
+          <div class="stat-value">$1,050</div>
+          <div class="stat-hint">Across all categories</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Savings goal</div>
+          <div class="stat-value" style="color: var(--brand-light);">$500</div>
+          <div class="stat-hint">On track</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview-section">
+      <h2>Buttons & chips</h2>
+      <div class="btn-row">
+        <button class="btn btn-primary" type="button">Primary</button>
+        <button class="btn btn-outline" type="button">Outline</button>
+        <button class="btn btn-ghost" type="button">Ghost</button>
+        <button class="btn btn-danger" type="button">Danger</button>
+        <button class="btn btn-primary btn-sm" type="button">Small</button>
+        <button class="btn btn-primary" type="button" disabled>Disabled</button>
+      </div>
+      <div class="btn-row">
+        <span class="tag-pill">Household</span>
+        <span class="badge">Role: Owner</span>
+        <span class="chip chip-brand">Brand</span>
+        <span class="chip chip-success">Under budget</span>
+        <span class="chip chip-warning">Near limit</span>
+        <span class="chip chip-danger">Over</span>
+      </div>
+    </div>
+
+    <div class="preview-section grid-2">
+      <div class="card card-accent">
+        <h3 class="card-title">Form sample</h3>
+        <div class="form-group" style="margin-top: 1rem;">
+          <label for="cat">Category</label>
+          <select id="cat">
+            <option>Groceries</option>
+            <option>Kids</option>
+            <option>Housing</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="amt">Amount</label>
+            <input id="amt" class="input-money" type="text" placeholder="0.00" value="86.40" />
+          </div>
+          <div class="form-group">
+            <label for="date">Date</label>
+            <input id="date" type="date" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="note">Note</label>
+          <textarea id="note" placeholder="Optional note"></textarea>
+        </div>
+        <button class="btn btn-primary" type="button">Save transaction</button>
+      </div>
+
+      <div>
+        <div class="alert alert-brand" style="margin-bottom: 1rem;">Brand alert — invite sent to household member.</div>
+        <div class="alert alert-success" style="margin-bottom: 1rem;">Success — budget updated.</div>
+        <div class="alert alert-warning" style="margin-bottom: 1rem;">Warning — groceries at 90% of limit.</div>
+        <div class="alert alert-danger" style="margin-bottom: 1rem;">Danger — overspent utilities this month.</div>
+        <div class="card">
+          <div class="stat-label">Groceries used</div>
+          <div style="display:flex; justify-content:space-between; margin: 0.5rem 0 0.65rem;">
+            <span class="text-primary mono">$540</span>
+            <span class="text-muted">of $600</span>
+          </div>
+          <div class="progress"><div class="progress-bar warn" style="width: 90%"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview-section">
+      <h2>Table</h2>
+      <div class="table-wrap" style="margin-top: 1rem;">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Category</th>
+              <th>Note</th>
+              <th class="num">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Aug 1</td>
+              <td><span class="chip chip-info">Income</span></td>
+              <td>Paycheck</td>
+              <td class="num positive">+$2,100.00</td>
+            </tr>
+            <tr>
+              <td>Aug 2</td>
+              <td><span class="chip chip-brand">Housing</span></td>
+              <td>Rent</td>
+              <td class="num negative">-$1,450.00</td>
+            </tr>
+            <tr>
+              <td>Aug 3</td>
+              <td><span class="chip chip-warning">Kids</span></td>
+              <td>School supplies</td>
+              <td class="num negative">-$86.40</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Household Money</title>
+  <link rel="icon" type="image/png" href="/brand/assets/logo_icon.png" />
+  <link rel="stylesheet" href="/brand/syphen-base.css" />
+  <link rel="stylesheet" href="/static/css/app.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
+  <script src="/static/js/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to main content</a>
+
+  <!-- LOGIN -->
+  <div id="login-view" class="login-page">
+    <div class="login-card">
+      <div class="logo-row">
+        <img src="/brand/assets/logo_icon_transparent.png" alt="" />
+        <div>
+          <span class="section-label" style="margin:0">Household Money</span>
+          <div class="text-secondary" style="font-size:0.85rem">Runs only on this computer</div>
+        </div>
+      </div>
+      <h1>Sign in</h1>
+      <p class="text-secondary" style="margin-bottom:1.25rem;font-size:0.9rem">
+        Private household app — cash, bills, goals, debt plan, and simple investments.
+        Adults only; data never leaves this machine unless you copy it.
+      </p>
+      <div id="login-error" class="alert alert-danger login-error"></div>
+      <form id="login-form">
+        <div class="form-group">
+          <label for="username">Username
+            <button type="button" class="help-icon" data-help="First-time install uses admin. After setup you can add spouse/partner logins under Household.">?</button>
+          </label>
+          <input id="username" name="username" autocomplete="username" required value="admin" />
+        </div>
+        <div class="form-group">
+          <label for="password">Password
+            <button type="button" class="help-icon" data-help="First-time password is admin. You will be asked to change it right away before using the app.">?</button>
+          </label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+        </div>
+        <button class="btn btn-primary btn-block" type="submit">Open budget</button>
+      </form>
+      <p class="login-hint">
+        First-time only: <span class="mono text-primary">admin</span> /
+        <span class="mono text-primary">admin</span>
+        <button type="button" class="help-icon" data-help="On a brand-new install. You must set a new password after login. To fully reset later, delete the data/budget.db file (that erases saved money data).">?</button>
+      </p>
+    </div>
+  </div>
+
+  <!-- Forced password change (first login) -->
+  <div id="pw-gate" class="pw-gate" hidden>
+    <div class="login-card pw-gate-card">
+      <span class="section-label">Security</span>
+      <h1>Choose a new password</h1>
+      <p class="text-secondary" style="margin-bottom:1.25rem;font-size:0.9rem">
+        This is your first login (or your account needs a new password).
+        Pick something only you know — then you can add a spouse or partner login.
+      </p>
+      <div id="pw-gate-error" class="alert alert-danger login-error"></div>
+      <form id="pw-gate-form">
+        <div class="form-group">
+          <label for="pw-current">Current password</label>
+          <input id="pw-current" type="password" required autocomplete="current-password" />
+        </div>
+        <div class="form-group">
+          <label for="pw-new">New password</label>
+          <input id="pw-new" type="password" required minlength="4" autocomplete="new-password" />
+        </div>
+        <div class="form-group">
+          <label for="pw-new2">Confirm new password</label>
+          <input id="pw-new2" type="password" required minlength="4" autocomplete="new-password" />
+        </div>
+        <button class="btn btn-primary btn-block" type="submit">Save password &amp; continue</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- APP -->
+  <div id="app-shell">
+    <header class="app-nav">
+      <div class="app-nav-inner">
+        <a class="app-logo" href="#" id="logo-home">
+          <img src="/brand/assets/logo_icon_transparent.png" alt="" />
+          <span id="household-title">Family Budget</span>
+        </a>
+        <div style="display:flex;align-items:center;gap:0.75rem">
+          <span class="badge" id="user-badge">—</span>
+          <button class="btn btn-ghost btn-sm" type="button" id="btn-logout">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="shell">
+      <aside class="sidebar">
+        <button class="nav-btn active" data-view="dashboard" type="button">
+          <span class="nav-icon">▦</span> Home
+        </button>
+        <button class="nav-btn" data-view="input" type="button">
+          <span class="nav-icon">＋</span> Money in / out
+        </button>
+        <button class="nav-btn" data-view="paystub" type="button">
+          <span class="nav-icon">$</span> Pay stub
+        </button>
+        <button class="nav-btn" data-view="goals" type="button">
+          <span class="nav-icon">◎</span> Goals
+        </button>
+        <button class="nav-btn" data-view="debts" type="button">
+          <span class="nav-icon">↓</span> Debt plan
+        </button>
+        <button class="nav-btn" data-view="invest" type="button">
+          <span class="nav-icon">↗</span> Investments
+        </button>
+        <button class="nav-btn" data-view="import" type="button">
+          <span class="nav-icon">⇪</span> Import
+        </button>
+        <button class="nav-btn" data-view="settings" type="button">
+          <span class="nav-icon">⚙</span> Household
+        </button>
+        <div class="sidebar-foot">
+          Local only · 10 min idle sign-out · shared household
+        </div>
+      </aside>
+
+      <main id="main" class="main-pane">
+        <!-- DASHBOARD -->
+        <section id="view-dashboard" class="view active">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Your household</span>
+              <div class="dash-name-row">
+                <h1 class="dash-name-wrap">
+                  <span id="dash-heading" class="dash-name-text">My Household</span>
+                  <input id="dash-name-input" class="dash-name-input" type="text" maxlength="120" hidden aria-label="Household name" />
+                  <button type="button" class="btn btn-ghost btn-sm dash-name-edit" id="dash-name-edit" title="Rename household">Rename</button>
+                  <button type="button" class="btn btn-primary btn-sm dash-name-save" id="dash-name-save" hidden>Save</button>
+                  <button type="button" class="btn btn-ghost btn-sm dash-name-cancel" id="dash-name-cancel" hidden>Cancel</button>
+                  <button type="button" class="help-icon" data-help="This is your household name on Home and in the top bar. Click Rename to change it (example: “Our Household” or “Family Budget”). Scroll down for the monthly calendar plan.">?</button>
+                </h1>
+                <span id="dash-name-msg" class="form-hint" style="margin:0"></span>
+              </div>
+              <div class="sub" id="dash-sub">Cash · plan · goals · debt · investments — all local</div>
+            </div>
+            <div class="month-nav">
+              <button class="btn btn-ghost btn-sm" type="button" id="prev-month">←</button>
+              <div class="month-label" id="month-label">—</div>
+              <button class="btn btn-ghost btn-sm" type="button" id="next-month">→</button>
+              <button class="btn btn-outline btn-sm" type="button" id="today-month">Today</button>
+            </div>
+          </div>
+
+          <div class="snapshot-hero" id="snapshot-hero"></div>
+
+          <div class="dash-top">
+            <div>
+              <div class="metrics-grid" id="stat-cards"></div>
+              <div class="legend">
+                <span><i style="background:#79b8ff"></i> Bill
+                  <button type="button" class="help-icon" data-help="A bill you expect to pay — rent, phone, insurance. Put the due date so it shows on the calendar.">?</button>
+                </span>
+                <span><i style="background:#e3b341"></i> Estimate
+                  <button type="button" class="help-icon" data-help="A best guess for the month (food, gas, kids stuff). Estimates still reduce the orange “est” balance so you can plan even when numbers are not exact.">?</button>
+                </span>
+                <span><i style="background:#3fb950"></i> Actual / pay
+                  <button type="button" class="help-icon" data-help="Money that really moved: a paycheck that hit, or a purchase you confirmed. These update the green “act” balance.">?</button>
+                </span>
+                <span><i style="background:#e6edf3"></i> Bank balance
+                  <button type="button" class="help-icon" data-help="When you check your bank, enter the total as “Current bank balance” on that date. The calendar restarts both running totals from that amount — like hitting reset with real life.">?</button>
+                </span>
+                <span style="color:#3fb950;font-family:var(--font-mono);font-weight:700">act
+                  <button type="button" class="help-icon" data-help="Green “act” = confirmed path. Paychecks + actuals (and paid bills). Best view of money you know about.">?</button>
+                </span>
+                <span style="color:#e3b341;font-family:var(--font-mono);font-weight:700">est
+                  <button type="button" class="help-icon" data-help="Orange “est” = full plan. Includes unpaid bills and estimates too, so you can see if the month will be tight before it happens.">?</button>
+                </span>
+                <span class="text-muted">Click a day to expand
+                  <button type="button" class="help-icon" data-help="Tap any date on the calendar to open a list of everything that day — useful when there are lots of small items.">?</button>
+                </span>
+              </div>
+              <div class="calendar" id="calendar"></div>
+              <div class="day-expand" id="day-expand" aria-live="polite">
+                <div class="day-expand-head">
+                  <div>
+                    <h3 id="day-expand-title">Day</h3>
+                    <div class="text-muted" style="font-size:0.78rem;margin-top:0.2rem" id="day-expand-sub"></div>
+                  </div>
+                  <div class="day-expand-balances" id="day-expand-balances"></div>
+                  <button class="btn btn-ghost btn-sm" type="button" id="day-expand-close">Close</button>
+                </div>
+                <div class="day-expand-body">
+                  <div class="table-wrap" style="border:none;border-radius:0">
+                    <table class="data" id="day-expand-table">
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Type</th>
+                          <th class="num">Amount</th>
+                          <th>Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody></tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="chart-box" style="margin-bottom:1rem">
+                <h3>Spend by category</h3>
+                <div class="chart-canvas-wrap">
+                  <canvas id="chart-category"></canvas>
+                </div>
+              </div>
+              <div class="chart-box">
+                <h3>Income vs expenses</h3>
+                <div class="chart-canvas-wrap">
+                  <canvas id="chart-income"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="upcoming-panel">
+            <div class="panel-head">
+              <h2>Upcoming due</h2>
+              <span class="text-muted" style="font-size:0.78rem">Scroll for full list</span>
+            </div>
+            <div class="upcoming-scroll">
+              <div class="table-wrap" style="border:none;border-radius:0">
+                <table class="data" id="upcoming-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th class="num">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- INPUT -->
+        <section id="view-input" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Manual entry</span>
+              <h1>Add bill, estimate, or pay
+                <button type="button" class="help-icon" data-help="Type money in by hand. No bank login is required. Use this for bills, paydays, guesses (estimates), and real transactions.">?</button>
+              </h1>
+              <div class="sub">No bank connection needed — keep it simple</div>
+            </div>
+          </div>
+
+          <div class="form-panel">
+            <h2>New item</h2>
+            <p class="lead">Pick a name from the list or add a custom one. Customs are remembered.</p>
+            <form id="item-form">
+              <div class="form-group">
+                <label for="item-name">Name
+                  <button type="button" class="help-icon" data-help="Choose a saved name (Rent, Food…) or “Custom name” to type a new one. If you check “Remember this name,” it stays in the list next time.">?</button>
+                </label>
+                <select id="item-name" required></select>
+                <div class="custom-name-row" id="custom-name-row">
+                  <input id="item-name-custom" type="text" placeholder="Type custom name" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="item-type">Type
+                    <button type="button" class="help-icon" data-help="Bill = planned bill. Estimate = monthly guess (food/gas). Paycheck = money coming in. Actual = confirmed spend or deposit. Bank balance = “I have $X in the bank today” and resets running totals.">?</button>
+                  </label>
+                  <select id="item-type">
+                    <option value="bill">Bill (planned)</option>
+                    <option value="estimate">Estimate (monthly plan)</option>
+                    <option value="paycheck">Paycheck / income</option>
+                    <option value="actual">Actual (confirmed spend/deposit)</option>
+                    <option value="balance">Current bank balance (sets running total)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="item-amount">Amount
+                    <button type="button" class="help-icon" data-help="For bills, estimates, pay, and actuals: the dollar amount. For bank balance: the full amount showing in your bank that day (not a payment).">?</button>
+                  </label>
+                  <input id="item-amount" class="input-money" type="number" min="0.01" step="0.01" required placeholder="0.00" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="item-date">Due / pay date
+                    <button type="button" class="help-icon" data-help="When it hits the calendar. For a bank balance, use the day you checked your account.">?</button>
+                  </label>
+                  <input id="item-date" type="date" required />
+                </div>
+                <div class="form-group">
+                  <label for="item-freq">Frequency
+                    <button type="button" class="help-icon" data-help="How often this usually repeats. For now this is a label to help you — each month you can add the next occurrence as needed.">?</button>
+                  </label>
+                  <select id="item-freq">
+                    <option value="once">One time</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly">Every 2 weeks</option>
+                    <option value="monthly" selected>Monthly</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="item-category">Category (optional)</label>
+                  <input id="item-category" type="text" placeholder="Housing, Kids, Food…" />
+                </div>
+                <div class="form-group">
+                  <label for="item-notes">Notes</label>
+                  <input id="item-notes" type="text" placeholder="Optional" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
+                  <input type="checkbox" id="item-retain" checked style="width:auto" />
+                  Remember this name in the dropdown
+                </label>
+              </div>
+              <button class="btn btn-primary" type="submit">Save item</button>
+              <span id="item-form-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
+
+          <div class="items-list">
+            <h2 style="margin-bottom:0.75rem">This month’s items</h2>
+            <div class="table-wrap">
+              <table class="data" id="items-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th class="num">Amount</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- PAY STUB -->
+        <section id="view-paystub" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Income</span>
+              <h1>Pay stub
+                <button type="button" class="help-icon" data-help="Upload a PDF pay stub (digital text PDF works best). We pull net pay, gross, taxes, and dates on this computer only — nothing is sent online. Then you can put paychecks on the calendar and save a job profile for planning.">?</button>
+              </h1>
+              <div class="sub">PDF upload · local parse · calendar paychecks · monthly take-home estimate</div>
+            </div>
+          </div>
+
+          <div class="alert alert-brand" style="margin-bottom:1.25rem;max-width:800px">
+            Useful for her (or you): skip guessing take-home pay. Upload a stub → check the numbers →
+            add paycheck(s) to the calendar and remember the job for next time.
+            <strong class="text-primary">Scanned photo PDFs</strong> may not extract well; typed/digital PDFs work best.
+          </div>
+
+          <div class="form-panel" style="margin-bottom:1.5rem">
+            <h2>1. Upload PDF</h2>
+            <div class="import-zone" style="margin-top:0.75rem">
+              <p class="text-primary" style="font-weight:600">Pay stub PDF</p>
+              <p class="text-secondary" style="font-size:0.9rem;margin-top:0.35rem">
+                File stays local. We do not store the PDF after reading it.
+              </p>
+              <input type="file" id="paystub-file" accept=".pdf,application/pdf" />
+            </div>
+            <button class="btn btn-outline" type="button" id="btn-parse-paystub" style="margin-top:0.75rem">Read pay stub</button>
+            <span id="paystub-parse-msg" class="form-hint" style="margin-left:0.75rem"></span>
+          </div>
+
+          <div class="form-panel" style="margin-bottom:1.5rem;max-width:800px">
+            <h2>2. Review &amp; fix
+              <button type="button" class="help-icon" data-help="Always double-check net pay and pay date. Parsers guess from labels — every employer formats stubs differently.">?</button>
+            </h2>
+            <p class="lead" id="paystub-confidence">Upload a PDF to fill these fields.</p>
+            <form id="paystub-apply-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="ps-employer">Employer / label</label>
+                  <input id="ps-employer" type="text" placeholder="Company name or Paycheck" />
+                </div>
+                <div class="form-group">
+                  <label for="ps-who">Whose job?
+                    <button type="button" class="help-icon" data-help="Optional tag like Mom or Sister so multiple jobs stay clear.">?</button>
+                  </label>
+                  <input id="ps-who" type="text" placeholder="e.g. Mom" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="ps-net">Net pay (take-home) $
+                    <button type="button" class="help-icon" data-help="What hits the bank. This is what we put on the calendar as income.">?</button>
+                  </label>
+                  <input id="ps-net" class="input-money" type="number" min="0.01" step="0.01" required />
+                </div>
+                <div class="form-group">
+                  <label for="ps-gross">Gross pay $</label>
+                  <input id="ps-gross" class="input-money" type="number" min="0" step="0.01" value="0" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="ps-date">Pay date</label>
+                  <input id="ps-date" type="date" required />
+                </div>
+                <div class="form-group">
+                  <label for="ps-freq">How often paid
+                    <button type="button" class="help-icon" data-help="Used to estimate monthly take-home and schedule future paychecks. Biweekly = every 2 weeks (26 pays/year).">?</button>
+                  </label>
+                  <select id="ps-freq">
+                    <option value="weekly">Weekly</option>
+                    <option value="biweekly" selected>Every 2 weeks (biweekly)</option>
+                    <option value="semimonthly">Twice a month (1st &amp; 15th style)</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+              </div>
+              <div class="metrics-grid" id="paystub-deductions" style="margin:1rem 0"></div>
+              <div class="stat" style="margin-bottom:1rem">
+                <div class="stat-label">Estimated monthly take-home</div>
+                <div class="stat-value positive" id="ps-monthly">—</div>
+                <div class="stat-hint">From net × pay frequency (planning number)</div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="ps-future">Also schedule future paychecks
+                    <button type="button" class="help-icon" data-help="Adds planned paychecks on the calendar after this pay date (same net amount). 0 = only this pay.">?</button>
+                  </label>
+                  <select id="ps-future">
+                    <option value="0" selected>Just this paycheck</option>
+                    <option value="2">+ 2 more</option>
+                    <option value="5">+ 5 more (about 3 months biweekly)</option>
+                    <option value="11">+ 11 more (~6 months biweekly)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="ps-notes">Notes</label>
+                  <input id="ps-notes" type="text" placeholder="Optional" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
+                  <input type="checkbox" id="ps-create" checked style="width:auto" />
+                  Put paycheck(s) on the calendar
+                </label>
+              </div>
+              <div class="form-group">
+                <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
+                  <input type="checkbox" id="ps-save-job" checked style="width:auto" />
+                  Save as job profile (for next time)
+                </label>
+              </div>
+              <button class="btn btn-primary" type="submit">Apply to budget</button>
+              <span id="paystub-apply-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
+
+          <div>
+            <h2 style="margin-bottom:0.75rem">Saved jobs</h2>
+            <div id="jobs-list" class="goals-grid"></div>
+          </div>
+        </section>
+
+        <!-- INVESTMENTS -->
+        <section id="view-invest" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Keep it simple</span>
+              <h1>Investments
+                <button type="button" class="help-icon" data-help="Simple buckets only (401k, IRA, etc.). You type the value when you look it up — this app does not connect to Fidelity or any bank. Optional “what you put in” shows gain or loss.">?</button>
+              </h1>
+              <div class="sub">Not a brokerage login — just “what’s it worth when I last checked?”</div>
+            </div>
+          </div>
+          <div class="alert alert-brand" style="margin-bottom:1.25rem;max-width:720px">
+            Add buckets like 401k, IRA, brokerage, crypto, or a kids’ 529. Update the value when you open a statement.
+            Gain/loss only shows if you enter what you put in (cost basis).
+          </div>
+          <div class="form-panel" style="margin-bottom:1.5rem">
+            <h2>Add account</h2>
+            <form id="invest-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="inv-name">Name</label>
+                  <input id="inv-name" type="text" required placeholder="Work 401k, Roth IRA, Crypto stash…" />
+                </div>
+                <div class="form-group">
+                  <label for="inv-type">Type</label>
+                  <select id="inv-type">
+                    <option value="401k">401k / workplace</option>
+                    <option value="ira">IRA / Roth</option>
+                    <option value="brokerage">Brokerage</option>
+                    <option value="crypto">Crypto</option>
+                    <option value="529">529 / college</option>
+                    <option value="hsa">HSA</option>
+                    <option value="savings">High-yield savings</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="inv-value">Current value ($)
+                    <button type="button" class="help-icon" data-help="What the account shows today (or the last time you checked). Update it anytime with the Update $ button in the list.">?</button>
+                  </label>
+                  <input id="inv-value" class="input-money" type="number" min="0" step="0.01" required value="0" />
+                </div>
+                <div class="form-group">
+                  <label for="inv-basis">What you put in — optional ($)
+                    <button type="button" class="help-icon" data-help="Rough total of your own contributions over time. If you fill this in, the app can show gain or loss (value minus what you put in). Leave 0 if you are not sure.">?</button>
+                  </label>
+                  <input id="inv-basis" class="input-money" type="number" min="0" step="0.01" value="0" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="inv-monthly">Monthly contribution ($)
+                    <button type="button" class="help-icon" data-help="About how much you add each month (auto-deposit or paycheck deferral). Used for the summary only — it does not auto-change your balance.">?</button>
+                  </label>
+                  <input id="inv-monthly" class="input-money" type="number" min="0" step="0.01" value="0" />
+                </div>
+                <div class="form-group">
+                  <label for="inv-notes">Notes</label>
+                  <input id="inv-notes" type="text" placeholder="Optional" />
+                </div>
+              </div>
+              <button class="btn btn-primary" type="submit">Save investment</button>
+              <span id="invest-form-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
+          <div id="invest-summary" class="metrics-grid" style="margin-bottom:1rem;max-width:720px"></div>
+          <div class="table-wrap">
+            <table class="data" id="invest-table">
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Type</th>
+                  <th class="num">Value</th>
+                  <th class="num">Gain / loss</th>
+                  <th class="num">Monthly</th>
+                  <th>Updated</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- GOALS -->
+        <section id="view-goals" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Targets</span>
+              <h1>Goals
+                <button type="button" class="help-icon" data-help="Things you are saving toward — vacation, house, emergency fund, car. Separate from day-to-day bills. Track how much you have and how much is left.">?</button>
+              </h1>
+              <div class="sub">House, vacation, emergency fund — track progress without guesswork</div>
+            </div>
+          </div>
+          <div class="form-panel" style="margin-bottom:1.5rem">
+            <h2>Add a goal</h2>
+            <p class="lead">Set a target amount and optional date. We’ll show how much to save per month.</p>
+            <form id="goal-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="goal-name">Goal name</label>
+                  <input id="goal-name" type="text" required placeholder="Vacation, house down payment…" />
+                </div>
+                <div class="form-group">
+                  <label for="goal-target">Target amount ($)
+                    <button type="button" class="help-icon" data-help="How much you want in total for this goal.">?</button>
+                  </label>
+                  <input id="goal-target" class="input-money" type="number" min="1" step="0.01" required />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="goal-current">Already saved ($)
+                    <button type="button" class="help-icon" data-help="What you already have set aside for this goal. Use “+ Add monthly” on a goal card when you put more money away.">?</button>
+                  </label>
+                  <input id="goal-current" class="input-money" type="number" min="0" step="0.01" value="0" />
+                </div>
+                <div class="form-group">
+                  <label for="goal-date">Target date (optional)
+                    <button type="button" class="help-icon" data-help="When you hope to reach the goal. If you set this, the app suggests about how much to save each month.">?</button>
+                  </label>
+                  <input id="goal-date" type="date" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="goal-monthly">Monthly savings ($)
+                    <button type="button" class="help-icon" data-help="What you plan to put toward this goal each month. The app uses it to estimate when you will arrive (ETA).">?</button>
+                  </label>
+                  <input id="goal-monthly" class="input-money" type="number" min="0" step="0.01" value="0" />
+                  <div class="form-hint">What you can put toward this each month</div>
+                </div>
+                <div class="form-group">
+                  <label for="goal-notes">Notes</label>
+                  <input id="goal-notes" type="text" placeholder="Optional" />
+                </div>
+              </div>
+              <button class="btn btn-primary" type="submit">Save goal</button>
+              <span id="goal-form-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
+          <div id="goals-list" class="goals-grid"></div>
+        </section>
+
+        <!-- DEBTS -->
+        <section id="view-debts" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Paydown</span>
+              <h1>Debt plan
+                <button type="button" class="help-icon" data-help="List credit cards and loans, then calculate a payoff plan. Pure math — not AI. Choose avalanche (highest interest first) or snowball (smallest balance first).">?</button>
+              </h1>
+              <div class="sub">Rule-based plan — no AI. Avalanche saves interest; snowball gives quick wins.</div>
+            </div>
+          </div>
+
+          <div class="form-panel" style="margin-bottom:1.5rem">
+            <h2>Add a debt</h2>
+            <p class="lead">Credit cards, car loan, personal loan — balance, APR, and minimum payment.</p>
+            <form id="debt-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="debt-name">Name</label>
+                  <input id="debt-name" type="text" required placeholder="Chase card, car loan…" />
+                </div>
+                <div class="form-group">
+                  <label for="debt-balance">Balance ($)
+                    <button type="button" class="help-icon" data-help="What you still owe on this card or loan right now.">?</button>
+                  </label>
+                  <input id="debt-balance" class="input-money" type="number" min="0.01" step="0.01" required />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="debt-apr">APR (%)
+                    <button type="button" class="help-icon" data-help="Annual interest rate from your statement (example: 22.9). Used to estimate how interest grows each month in the plan.">?</button>
+                  </label>
+                  <input id="debt-apr" class="input-money" type="number" min="0" step="0.01" value="0" placeholder="22.9" />
+                </div>
+                <div class="form-group">
+                  <label for="debt-min">Minimum payment ($)
+                    <button type="button" class="help-icon" data-help="The smallest amount the lender requires each month. The plan always pays every minimum first.">?</button>
+                  </label>
+                  <input id="debt-min" class="input-money" type="number" min="0" step="0.01" value="0" />
+                </div>
+              </div>
+              <button class="btn btn-primary" type="submit">Save debt</button>
+              <span id="debt-form-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
+
+          <div class="table-wrap" style="margin-bottom:1.5rem">
+            <table class="data" id="debts-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th class="num">Balance</th>
+                  <th class="num">APR</th>
+                  <th class="num">Min pay</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div class="form-panel" style="max-width:960px">
+            <h2>Build paydown plan
+              <button type="button" class="help-icon" data-help="Each month the plan: (1) adds interest, (2) pays all minimums, (3) puts your extra dollars on one debt. When that debt is gone, the extra rolls to the next.">?</button>
+            </h2>
+            <p class="lead">Every month: pay all minimums, put extra toward one debt (strategy below).</p>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="plan-strategy">Strategy
+                  <button type="button" class="help-icon" data-help="Avalanche: attack the highest APR first — usually least interest overall. Snowball: pay off the smallest balance first — quicker wins, can feel more motivating.">?</button>
+                </label>
+                <select id="plan-strategy">
+                  <option value="avalanche">Avalanche — highest interest first (usually cheapest)</option>
+                  <option value="snowball">Snowball — smallest balance first (quick wins)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="plan-extra">Extra monthly payment ($)
+                  <button type="button" class="help-icon" data-help="Extra dollars beyond all minimums combined that you can put toward debt each month. More extra = debt free sooner.">?</button>
+                </label>
+                <input id="plan-extra" class="input-money" type="number" min="0" step="0.01" value="100" />
+                <div class="form-hint">On top of all minimums combined</div>
+              </div>
+            </div>
+            <button class="btn btn-primary" type="button" id="btn-run-plan">Calculate plan</button>
+            <span id="plan-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            <div id="plan-results" style="margin-top:1.25rem"></div>
+          </div>
+        </section>
+
+        <!-- IMPORT -->
+        <section id="view-import" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Actuals</span>
+              <h1>Import bank statement
+                <button type="button" class="help-icon" data-help="Upload a CSV download from online banking (not a PDF). Built for Chase, Bank of America, Wells Fargo, Citi, and U.S. Bank. Everything stays on this computer — Preview first, then import.">?</button>
+              </h1>
+              <div class="sub">CSV only · Chase · Bank of America · Wells Fargo · Citi · U.S. Bank</div>
+            </div>
+          </div>
+          <div class="form-panel" style="max-width:960px">
+            <div class="form-group" style="max-width:360px">
+              <label for="import-bank">Bank
+                <button type="button" class="help-icon" data-help="Auto-detect works for most CSVs. If Preview looks wrong, pick your bank and try again. You use Chase — that layout is included.">?</button>
+              </label>
+              <select id="import-bank">
+                <option value="auto" selected>Auto-detect</option>
+                <option value="chase">Chase</option>
+                <option value="bank_of_america">Bank of America</option>
+                <option value="wells_fargo">Wells Fargo</option>
+                <option value="citi">Citi</option>
+                <option value="us_bank">U.S. Bank</option>
+                <option value="generic">Generic CSV</option>
+              </select>
+            </div>
+            <div class="import-zone">
+              <p class="text-primary" style="font-weight:600">CSV from online banking
+                <button type="button" class="help-icon" data-help="Chase: account → download. BofA: activity → download. Wells: account activity → comma delimited. Citi / U.S. Bank: export/download transactions. Choose CSV or spreadsheet, not PDF.">?</button>
+              </p>
+              <p class="text-secondary" style="font-size:0.9rem;margin-top:0.35rem">
+                Date + description + amount (or debit/credit). PDFs are not supported.
+              </p>
+              <input type="file" id="statement-file" accept=".csv,text/csv,.txt" />
+            </div>
+            <div style="display:flex;gap:0.65rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
+              <button class="btn btn-outline" type="button" id="btn-preview-import">Preview</button>
+              <button class="btn btn-primary" type="button" id="btn-commit-import">Import as actuals</button>
+              <button type="button" class="help-icon" data-help="Preview shows what would import without saving. Import as actuals saves those rows as confirmed transactions on your calendar.">?</button>
+              <span id="import-msg" class="form-hint"></span>
+            </div>
+            <div id="import-bank-badge" class="text-muted" style="font-size:0.85rem;margin-bottom:0.75rem"></div>
+            <div class="table-wrap">
+              <table class="data" id="import-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Description</th>
+                    <th class="num">Amount</th>
+                    <th>Flow</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section id="view-settings" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Household</span>
+              <h1>Settings
+                <button type="button" class="help-icon" data-help="Household name, starting cash, and who can sign in. Everything stays on this computer unless you copy the files yourself.">?</button>
+              </h1>
+              <div class="sub">Starting balance drives the calendar running total</div>
+            </div>
+          </div>
+          <div class="settings-grid">
+            <div class="form-panel">
+              <h2>Balance & name</h2>
+              <form id="settings-form" style="margin-top:1rem">
+                <div class="form-group">
+                  <label for="hh-name">Household name</label>
+                  <input id="hh-name" type="text" />
+                </div>
+                <div class="form-group">
+                  <label for="hh-balance">Starting cash ($)
+                    <button type="button" class="help-icon" data-help="Opening cash number for planning. Once you log a real bank balance on the calendar, that becomes the better source of truth from that day forward.">?</button>
+                  </label>
+                  <input id="hh-balance" class="input-money" type="number" step="0.01" />
+                  <div class="form-hint">Used until someone logs a bank balance on the calendar.</div>
+                </div>
+                <button class="btn btn-primary" type="submit">Save settings</button>
+                <span id="settings-msg" class="form-hint" style="margin-left:0.75rem"></span>
+              </form>
+            </div>
+            <div class="form-panel">
+              <h2>My password
+                <button type="button" class="help-icon" data-help="Change the password for the account you are signed in as right now.">?</button>
+              </h2>
+              <form id="password-form" style="margin-top:1rem">
+                <div class="form-group">
+                  <label for="set-pw-current">Current password</label>
+                  <input id="set-pw-current" type="password" required autocomplete="current-password" />
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="set-pw-new">New password</label>
+                    <input id="set-pw-new" type="password" required minlength="4" autocomplete="new-password" />
+                  </div>
+                  <div class="form-group">
+                    <label for="set-pw-new2">Confirm</label>
+                    <input id="set-pw-new2" type="password" required minlength="4" autocomplete="new-password" />
+                  </div>
+                </div>
+                <button class="btn btn-outline" type="submit">Update password</button>
+                <span id="password-msg" class="form-hint" style="margin-left:0.75rem"></span>
+              </form>
+            </div>
+            <div class="form-panel">
+              <h2>People &amp; logins
+                <button type="button" class="help-icon" data-help="Add simple logins for adults who share this household. Married couple? Add your spouse as Partner so both have full day-to-day access. Same computer, separate passwords.">?</button>
+              </h2>
+              <p class="lead">Create a login for a spouse, partner, or helper. Pick a permission level.</p>
+              <div id="members-list" style="margin-bottom:1rem"></div>
+              <form id="member-form">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="mem-user">Username</label>
+                    <input id="mem-user" type="text" required autocomplete="off" placeholder="e.g. jordan" />
+                  </div>
+                  <div class="form-group">
+                    <label for="mem-name">Display name</label>
+                    <input id="mem-name" type="text" placeholder="What shows in the app" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="mem-pass">Password</label>
+                    <input id="mem-pass" type="password" required minlength="4" autocomplete="new-password" />
+                  </div>
+                  <div class="form-group">
+                    <label for="mem-role">Permission
+                      <button type="button" class="help-icon" data-help="Partner: full access like you (good for married/shared money). Owner: can manage everything including people. Member: edit bills/goals but not add logins. Viewer: look only.">?</button>
+                    </label>
+                    <select id="mem-role">
+                      <option value="partner" selected>Partner — full access (spouse / co-parent)</option>
+                      <option value="owner">Owner — full control + manage people</option>
+                      <option value="member">Member — edit money, not people</option>
+                      <option value="viewer">Viewer — look only</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
+                    <input type="checkbox" id="mem-force-pw" style="width:auto" />
+                    Make them change password on first login
+                  </label>
+                </div>
+                <button class="btn btn-outline" type="submit">Add login</button>
+                <span id="member-msg" class="form-hint" style="margin-left:0.75rem"></span>
+              </form>
+            </div>
+            <div class="card">
+              <h3 class="card-title">How the calendar works</h3>
+              <p class="card-body" style="margin-top:0.75rem">
+                <strong style="color:#3fb950">act</strong> (green) = confirmed money.
+                <strong style="color:#e3b341">est</strong> (orange) = plan with estimates.
+                Log <strong class="text-primary">bank balance</strong> on a day to reset from real life.
+              </p>
+              <p class="card-body" style="margin-top:0.75rem">
+                Net worth on Home = cash + investments − debts. Goals are tracked separately as targets.
+              </p>
+            </div>
+            <div class="card">
+              <h3 class="card-title">Sharing with family</h3>
+              <p class="card-body" style="margin-top:0.75rem">
+                Install once (or run Docker) on a PC you both use, or copy the whole folder +
+                <span class="mono">data/</span> database. Add logins here — no cloud required.
+              </p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

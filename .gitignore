@@ -1,0 +1,51 @@
+# === NEVER commit secrets or real household money data ===
+
+# Secrets / tokens
+github_pat.txt
+*.pat
+.env
+.env.*
+*.pem
+*.key
+
+# Personal financial documents
+*.pdf
+!brand/**/*.pdf
+private/
+paystubs/
+statements/
+uploads/
+# Personal doc names only — do NOT ignore backend code like paystub.py
+*_pay_stub.pdf
+*_payslip.pdf
+*_statement.pdf
+*_W-2.pdf
+*_w2.pdf
+
+# Real bank CSVs dropped in repo root (samples/bank-csv/ is allowed)
+/*.csv
+/import*.csv
+
+# Live local database (real balances, real names)
+data/*
+!data/.gitkeep
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Local scratch
+tmp/
+temp/
+*.log
