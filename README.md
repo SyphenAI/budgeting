@@ -69,16 +69,24 @@ That step creates a desktop shortcut named **Household Money** when possible.
 ## Every time you want to use the app
 
 1. Double-click **`start.bat`**  
-   - or double-click the **Household Money** icon on your Desktop  
-2. Wait a few seconds  
+   - or the **Household Money** shortcut if setup created one  
+2. Wait until the window says **App is ready** (can take up to a minute the first time)  
 3. Your browser should open to the app  
-4. Leave the small black window open while you work  
-5. When finished, close that black window (or press a key in it if it asks)
+4. Leave the window titled **“Household Money - keep open”** running while you work  
+5. When finished, close that **keep open** window  
 
-If the browser does not open by itself, open Chrome/Edge and go to:
+If the browser opens but the page fails, wait 10 seconds and press **Refresh** (F5).
+
+If the browser does not open, open Chrome or Edge and type exactly:
 
 **http://127.0.0.1:8787**
 
+### If the page still will not load
+
+1. Look at the **“Household Money - keep open”** window for red error text  
+2. Run **`install.bat`** again, then **`start.bat`**  
+3. Restart the computer once, then try **`start.bat`** again  
+4. Make sure you are using the folder that contains **both** `install.bat` and the `backend` folder (not an empty outer folder from the zip)
 ---
 
 ## Sign in (first time)
