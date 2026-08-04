@@ -8,6 +8,9 @@ echo  ============================================
 echo   Household Money
 echo  ============================================
 echo.
+echo  NOTE: If Windows Defender blocks this, right-click
+echo  start.bat and choose "Run as administrator".
+echo.
 
 if not exist "%~dp0.venv\Scripts\python.exe" (
   echo  Setup has not been run yet on THIS folder.

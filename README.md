@@ -10,10 +10,42 @@ You do **not** need to know how to code.
 
 ---
 
+## Important: Windows Defender / “blocked” messages
+
+On many Windows PCs, **Windows Defender** (or SmartScreen) will warn you about `.bat` files or Python. That is common for apps that are not from the Microsoft Store.
+
+### If Windows blocks the app
+
+Try these in order:
+
+1. **Run as administrator (often required)**  
+   - Right-click **`install.bat`** → **Run as administrator**  
+   - Later, right-click **`start.bat`** → **Run as administrator**  
+   - If Windows asks “Do you want to allow this app to make changes?”, click **Yes**
+
+2. **SmartScreen “Windows protected your PC”**  
+   - Click **More info**  
+   - Click **Run anyway**
+
+3. **Defender deleted or quarantined a file**  
+   - Open **Windows Security** → **Virus & threat protection** → **Protection history**  
+   - Find the blocked item related to this folder  
+   - Choose **Allow** / **Restore**  
+   - Optionally: **Manage settings** → **Exclusions** → **Add an exclusion** → **Folder**  
+     and select this app folder (the one that contains `install.bat`)
+
+4. **Still blocked**  
+   - Temporarily turn off real-time protection, run `install.bat` / `start.bat`, then turn protection back on  
+   - Or ask whoever manages the PC (work laptop policies can block this)
+
+**Note:** Running as admin is for **installing and starting** the app on a locked-down PC. Your money data still stays on this computer. Only use admin when Windows will not let the app run otherwise.
+
+---
+
 ## What you will do (overview)
 
 1. **One-time setup** on the computer (about 15–20 minutes)  
-2. **Start the app** with a double-click whenever you want to use it  
+2. **Start the app** with a double-click (or **Run as administrator** if Defender blocks it)  
 3. **Sign in** in your web browser  
 4. Enter your bills and income at your own pace  
 
@@ -53,23 +85,25 @@ If you already installed Python earlier without that box, uninstall Python from 
 
 ---
 
-## First-time setup (double-click)
+## First-time setup
 
 1. Open the app folder  
 2. Find the file named **`install.bat`**  
-3. **Double-click** it  
-4. If Windows asks “Do you want to allow this app…?”, choose **Yes** / **More info** → **Run anyway**  
+3. Right-click it → **Run as administrator**  
+   - (If that works without admin later, a normal double-click is fine)  
+4. If Windows says it protected your PC: **More info** → **Run anyway**  
 5. A black window will show progress — **wait until it says DONE**  
 6. Press any key to close that window when finished  
 
-That step creates a desktop shortcut named **Household Money** when possible.
+That step may create a desktop shortcut named **Household Money** when possible.
 
 ---
 
 ## Every time you want to use the app
 
-1. Double-click **`start.bat`**  
-   - or the **Household Money** shortcut if setup created one  
+1. Right-click **`start.bat`** → **Run as administrator**  
+   - (or double-click if your PC allows it)  
+   - or use the **Household Money** shortcut if setup created one  
 2. Wait until the window says **App is ready** (can take up to a minute the first time)  
 3. Your browser should open to the app  
 4. Leave the window titled **“Household Money - keep open”** running while you work  
@@ -84,10 +118,13 @@ If the browser does not open, open Chrome or Edge and type exactly:
 ### If the page still will not load
 
 1. Look at the **“Household Money - keep open”** window for red error text  
-2. Run **`install.bat`** again, then **`start.bat`**  
-3. Restart the computer once, then try **`start.bat`** again  
-4. Make sure you are using the folder that contains **both** `install.bat` and the `backend` folder (not an empty outer folder from the zip)
+2. Confirm you used **Run as administrator** if Defender was blocking things  
+3. Run **`install.bat`** again (as admin), then **`start.bat`** (as admin)  
+4. Restart the computer once, then try **`start.bat`** again  
+5. Make sure you are using the folder that contains **both** `install.bat` and the `backend` folder (not an empty outer folder from the zip)
+
 ---
+
 
 ## Sign in (first time)
 

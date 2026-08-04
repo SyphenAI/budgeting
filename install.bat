@@ -13,6 +13,10 @@ echo  You only need to do this once.
 echo.
 echo  Please leave this window open until it says DONE.
 echo.
+echo  NOTE: If Windows Defender blocks this, right-click
+echo  install.bat and choose "Run as administrator".
+echo  SmartScreen: More info -^> Run anyway.
+echo.
 
 if not exist "backend\requirements.txt" (
   echo  [ERROR] Cannot find backend\requirements.txt
