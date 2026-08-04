@@ -163,6 +163,9 @@ class StatementParseResponse(BaseModel):
     bank: str = "generic"
     bank_label: str = "Generic CSV"
     skipped: int = 0
+    # Helps the UI jump the calendar to where imports landed
+    first_date: Optional[Date] = None
+    last_date: Optional[Date] = None
 
 
 # ── Goals ──────────────────────────────────────────────────────────

@@ -1280,13 +1280,18 @@ async def import_statement(
     skipped = sum(1 for r in rows if not r.date or r.amount <= 0)
 
     imported = 0
+    first_date = None
+    last_date = None
+    dated = [r for r in rows if r.date and r.amount > 0]
+    if dated:
+        first_date = min(r.date for r in dated)
+        last_date = max(r.date for r in dated)
+
     if commit:
         hh = get_household(db)
         label = BANK_PRESETS.get(detected, detected)
         fmt = "PDF" if is_pdf else "CSV"
-        for r in rows:
-            if not r.date or r.amount <= 0:
-                continue
+        for r in dated:
             db.add(
                 BudgetItem(
                     household_id=hh.id,
@@ -1306,7 +1311,19 @@ async def import_statement(
     bank_label = BANK_PRESETS.get(detected, detected)
     if is_pdf and detected == "chase":
         bank_label = "Chase (PDF statement)"
-    suffix = f"; imported {imported}" if commit else " — preview only (not saved yet)"
+    if commit:
+        if imported:
+            range_txt = ""
+            if first_date and last_date:
+                range_txt = f" ({first_date.isoformat()} → {last_date.isoformat()})"
+            suffix = (
+                f" — SAVED {imported} transaction(s){range_txt}. "
+                "Open Home and use the month arrows to that period if you do not see them."
+            )
+        else:
+            suffix = " — nothing saved (rows missing dates or amounts)"
+    else:
+        suffix = " — preview only (not saved yet). Click Import as actuals to save."
     if skipped:
         suffix += f"; {skipped} row(s) missing date/amount skipped on save"
     if not rows:
@@ -1318,6 +1335,8 @@ async def import_statement(
         bank=detected,
         bank_label=bank_label,
         skipped=skipped,
+        first_date=first_date,
+        last_date=last_date,
     )
 
 

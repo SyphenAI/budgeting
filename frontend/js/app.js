@@ -1378,8 +1378,12 @@
   async function runImport(commit) {
     const file = $("#statement-file").files[0];
     if (!file) {
-      $("#import-msg").textContent = "Choose a CSV file first.";
+      $("#import-msg").textContent = "Choose a CSV or PDF file first.";
       return;
+    }
+    const msgEl = $("#import-msg");
+    if (msgEl) {
+      msgEl.textContent = commit ? "Saving to your budget…" : "Reading file…";
     }
     const bank = $("#import-bank")?.value || "auto";
     const fd = new FormData();
@@ -1392,22 +1396,22 @@
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
-      throw new Error(j.detail || "Import failed");
+      let detail = j.detail || "Import failed";
+      if (Array.isArray(detail)) {
+        detail = detail.map((d) => d.msg || JSON.stringify(d)).join("; ");
+      }
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
     }
     const data = await res.json();
-    $("#import-msg").textContent = data.message || "";
+    if (msgEl) {
+      msgEl.textContent = data.message || "";
+      msgEl.style.color = commit && data.imported > 0 ? "var(--success)" : "";
+    }
     const badge = $("#import-bank-badge");
     if (badge) {
       badge.innerHTML = data.bank_label
         ? `Detected / used: <strong class="text-primary">${escapeHtml(data.bank_label)}</strong>`
         : "";
-    }
-    // If auto-detected, sync dropdown so user sees what matched
-    if (bank === "auto" && data.bank && $("#import-bank")) {
-      const opt = [...$("#import-bank").options].find((o) => o.value === data.bank);
-      if (opt) {
-        /* leave on auto so next file can re-detect; only show badge */
-      }
     }
     const tbody = $("#import-table tbody");
     tbody.innerHTML = (data.rows || [])
@@ -1422,7 +1426,34 @@
         </tr>`;
       })
       .join("") || `<tr><td colspan="4" class="text-muted">No rows parsed — try Bank: Chase for PDF statements, or check the file is a text PDF/CSV from online banking (not a photo).</td></tr>`;
-    if (commit) await refreshDashboard();
+
+    if (commit) {
+      if (data.imported > 0) {
+        // Jump Home calendar to the month of the import (statements are often last month)
+        const jump = data.first_date || data.last_date;
+        if (jump) {
+          const d = new Date(String(jump) + "T12:00:00");
+          if (!Number.isNaN(d.getTime())) {
+            state.year = d.getFullYear();
+            state.month = d.getMonth() + 1;
+          }
+        }
+        alert(
+          `Saved ${data.imported} transaction(s) to your budget.\n\n` +
+            `They appear on Home for the statement dates` +
+            (data.first_date && data.last_date
+              ? ` (${data.first_date} → ${data.last_date})`
+              : "") +
+            `.\n\nSwitching to Home now — use the month arrows if needed.`
+        );
+        setView("dashboard");
+        await refreshDashboard();
+      } else {
+        alert(
+          "Nothing was saved. Rows may be missing dates or amounts. Check the preview table."
+        );
+      }
+    }
   }
 
   function escapeHtml(s) {
