@@ -150,6 +150,10 @@
               <div class="month-label" id="month-label">—</div>
               <button class="btn btn-ghost btn-sm" type="button" id="next-month">→</button>
               <button class="btn btn-outline btn-sm" type="button" id="today-month">Today</button>
+              <button class="btn btn-primary btn-sm" type="button" id="btn-print-month" title="Print this month’s overview">
+                Print month
+              </button>
+              <button type="button" class="help-icon" data-help="Creates a clean one-page overview of the month on screen (summary + list of items) and opens your browser’s print dialog. Choose your printer or Save as PDF. Uses the month currently shown on Home.">?</button>
             </div>
           </div>
 
@@ -905,5 +909,8 @@
       </main>
     </div>
   </div>
+
+  <!-- Printable month overview (hidden on screen; shown only when printing) -->
+  <div id="print-report" class="print-report" aria-hidden="true"></div>
 </body>
 </html>
