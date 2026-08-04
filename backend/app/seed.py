@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from datetime import date
-from calendar import monthrange
-
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from .models import BudgetItem, Household, ItemName, User
+from .models import Household, ItemName, User
 
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -74,6 +71,7 @@ def seed_if_empty(db: Session) -> None:
     db.add_all([admin, household])
     db.flush()
 
+    # Dropdown name suggestions only — no pre-filled money items
     for name, kind in DEFAULT_NAMES:
         db.add(
             ItemName(
@@ -84,108 +82,4 @@ def seed_if_empty(db: Session) -> None:
             )
         )
 
-    today = date.today()
-    y, m = today.year, today.month
-    last_day = monthrange(y, m)[1]
-
-    def d(day: int) -> date:
-        return date(y, m, min(day, last_day))
-
-    samples = [
-        BudgetItem(
-            household_id=household.id,
-            name="Paycheck",
-            item_type="paycheck",
-            amount=2100.0,
-            is_income=True,
-            due_date=d(1),
-            frequency="biweekly",
-            notes="Sample — edit or delete",
-            category="Income",
-        ),
-        BudgetItem(
-            household_id=household.id,
-            name="Paycheck",
-            item_type="paycheck",
-            amount=2100.0,
-            is_income=True,
-            due_date=d(15),
-            frequency="biweekly",
-            notes="Sample — edit or delete",
-            category="Income",
-        ),
-        BudgetItem(
-            household_id=household.id,
-            name="Rent / Mortgage",
-            item_type="bill",
-            amount=1450.0,
-            is_income=False,
-            due_date=d(1),
-            frequency="monthly",
-            category="Housing",
-        ),
-        BudgetItem(
-            household_id=household.id,
-            name="Electric",
-            item_type="bill",
-            amount=140.0,
-            is_income=False,
-            due_date=d(12),
-            frequency="monthly",
-            category="Utilities",
-        ),
-        BudgetItem(
-            household_id=household.id,
-            name="Phone",
-            item_type="bill",
-            amount=95.0,
-            is_income=False,
-            due_date=d(18),
-            frequency="monthly",
-            category="Utilities",
-        ),
-        BudgetItem(
-            household_id=household.id,
-            name="Car insurance",
-            item_type="bill",
-            amount=165.0,
-            is_income=False,
-            due_date=d(22),
-            frequency="monthly",
-            category="Transport",
-        ),
-        BudgetItem(
-            household_id=household.id,
-            name="Food",
-            item_type="estimate",
-            amount=600.0,
-            is_income=False,
-            due_date=d(1),
-            frequency="monthly",
-            notes="Monthly estimate — hits running balance",
-            category="Food",
-        ),
-        BudgetItem(
-            household_id=household.id,
-            name="Gas",
-            item_type="estimate",
-            amount=250.0,
-            is_income=False,
-            due_date=d(1),
-            frequency="monthly",
-            notes="Monthly estimate",
-            category="Transport",
-        ),
-        BudgetItem(
-            household_id=household.id,
-            name="Kids activities",
-            item_type="estimate",
-            amount=120.0,
-            is_income=False,
-            due_date=d(10),
-            frequency="monthly",
-            category="Kids",
-        ),
-    ]
-    db.add_all(samples)
     db.commit()
