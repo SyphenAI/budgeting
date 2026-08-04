@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Household Money</title>
   <link rel="icon" type="image/png" href="/brand/assets/logo_icon.png" />
-  <link rel="stylesheet" href="/brand/syphen-base.css?v=1.2.0" />
-  <link rel="stylesheet" href="/static/css/app.css?v=1.2.0" />
+  <link rel="stylesheet" href="/brand/syphen-base.css?v=1.3.0" />
+  <link rel="stylesheet" href="/static/css/app.css?v=1.3.0" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-  <script src="/static/js/app.js?v=1.2.0" defer></script>
+  <script src="/static/js/app.js?v=1.3.0" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -762,19 +762,28 @@
             </div>
             <div style="display:flex;gap:0.65rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
               <button class="btn btn-outline" type="button" id="btn-preview-import">Preview</button>
-              <button class="btn btn-primary" type="button" id="btn-commit-import">Import as actuals</button>
-              <button type="button" class="help-icon" data-help="Preview shows what would import without saving. Import as actuals saves those rows as confirmed transactions on your calendar.">?</button>
+              <button class="btn btn-primary" type="button" id="btn-commit-import">Import selected</button>
+              <button type="button" class="help-icon" data-help="Preview loads the statement. Check only the rows you want, set a category bucket (Income, Food, Electric, Water…), then Import selected. Unchecked rows are ignored.">?</button>
               <span id="import-msg" class="form-hint"></span>
             </div>
-            <div id="import-bank-badge" class="text-muted" style="font-size:0.85rem;margin-bottom:0.75rem"></div>
-            <div class="table-wrap">
+            <div id="import-bank-badge" class="text-muted" style="font-size:0.85rem;margin-bottom:0.5rem"></div>
+            <div id="import-toolbar" class="import-toolbar" style="display:none;margin-bottom:0.75rem">
+              <button class="btn btn-ghost btn-sm" type="button" id="btn-import-all">Select all</button>
+              <button class="btn btn-ghost btn-sm" type="button" id="btn-import-none">Select none</button>
+              <button class="btn btn-ghost btn-sm" type="button" id="btn-import-income">Income only</button>
+              <button class="btn btn-ghost btn-sm" type="button" id="btn-import-expenses">Expenses only</button>
+              <span class="text-muted" style="font-size:0.8rem;margin-left:0.35rem" id="import-selected-count"></span>
+            </div>
+            <div class="table-wrap import-table-wrap">
               <table class="data" id="import-table">
                 <thead>
                   <tr>
+                    <th style="width:2.5rem">Use</th>
                     <th>Date</th>
                     <th>Description</th>
                     <th class="num">Amount</th>
                     <th>Flow</th>
+                    <th>Category</th>
                   </tr>
                 </thead>
                 <tbody></tbody>

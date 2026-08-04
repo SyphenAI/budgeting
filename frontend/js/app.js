@@ -16,6 +16,9 @@
     selectedDate: null,
     idleTimer: null,
     lastActivity: Date.now(),
+    importRows: [],
+    importCategories: [],
+    importBankLabel: "Import",
   };
 
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -1375,7 +1378,119 @@
 
   // ── Import ──────────────────────────────────────────────────
 
-  async function runImport(commit) {
+  const DEFAULT_IMPORT_CATS = [
+    "Income",
+    "Housing",
+    "Utilities",
+    "Electric",
+    "Water",
+    "Internet / Phone",
+    "Insurance",
+    "Groceries / Food",
+    "Gas / Transport",
+    "Credit card payment",
+    "Transfer",
+    "Medical",
+    "Shopping",
+    "Subscriptions",
+    "Kids",
+    "Debt payment",
+    "Savings / Investment",
+    "Fees",
+    "Other",
+    "Imported",
+  ];
+
+  function importCategoryOptions(selected) {
+    const cats = state.importCategories.length
+      ? state.importCategories
+      : DEFAULT_IMPORT_CATS;
+    return cats
+      .map(
+        (c) =>
+          `<option value="${escapeAttr(c)}" ${c === selected ? "selected" : ""}>${escapeHtml(c)}</option>`
+      )
+      .join("");
+  }
+
+  function updateImportSelectedCount() {
+    const el = $("#import-selected-count");
+    if (!el) return;
+    const n = state.importRows.filter((r) => r.selected && r.date && r.amount > 0).length;
+    const total = state.importRows.length;
+    el.textContent = total ? `${n} of ${total} selected` : "";
+  }
+
+  function renderImportTable() {
+    const tbody = $("#import-table tbody");
+    const toolbar = $("#import-toolbar");
+    if (!tbody) return;
+    if (!state.importRows.length) {
+      if (toolbar) toolbar.style.display = "none";
+      tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Preview a statement to choose what to import.</td></tr>`;
+      updateImportSelectedCount();
+      return;
+    }
+    if (toolbar) toolbar.style.display = "flex";
+    tbody.innerHTML = state.importRows
+      .map((r, i) => {
+        const cls = r.is_income ? "positive" : "negative";
+        const missing = !r.date || !(r.amount > 0);
+        const off = !r.selected || missing ? "import-off" : "";
+        return `<tr class="${off}" data-import-idx="${i}">
+          <td>
+            <input class="import-check" type="checkbox" data-import-check="${i}"
+              ${r.selected && !missing ? "checked" : ""} ${missing ? "disabled" : ""} />
+          </td>
+          <td>${r.date || "— missing"}</td>
+          <td>${escapeHtml(r.description)}</td>
+          <td class="num ${cls}">${money(r.amount)}</td>
+          <td>${r.is_income ? "In" : "Out"}</td>
+          <td>
+            <select class="import-cat" data-import-cat="${i}" ${missing ? "disabled" : ""}>
+              ${importCategoryOptions(r.category || (r.is_income ? "Income" : "Other"))}
+            </select>
+          </td>
+        </tr>`;
+      })
+      .join("");
+
+    tbody.querySelectorAll("[data-import-check]").forEach((box) => {
+      box.addEventListener("change", () => {
+        const i = Number(box.dataset.importCheck);
+        if (state.importRows[i]) {
+          state.importRows[i].selected = box.checked;
+          renderImportTable();
+        }
+      });
+    });
+    tbody.querySelectorAll("[data-import-cat]").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        const i = Number(sel.dataset.importCat);
+        if (state.importRows[i]) {
+          state.importRows[i].category = sel.value;
+          if (sel.value === "Income") state.importRows[i].is_income = true;
+        }
+      });
+    });
+    updateImportSelectedCount();
+  }
+
+  function setImportSelection(mode) {
+    state.importRows.forEach((r) => {
+      if (!r.date || !(r.amount > 0)) {
+        r.selected = false;
+        return;
+      }
+      if (mode === "all") r.selected = true;
+      else if (mode === "none") r.selected = false;
+      else if (mode === "income") r.selected = !!r.is_income;
+      else if (mode === "expenses") r.selected = !r.is_income;
+    });
+    renderImportTable();
+  }
+
+  async function runImportPreview() {
     const file = $("#statement-file").files[0];
     if (!file) {
       $("#import-msg").textContent = "Choose a CSV or PDF file first.";
@@ -1383,12 +1498,13 @@
     }
     const msgEl = $("#import-msg");
     if (msgEl) {
-      msgEl.textContent = commit ? "Saving to your budget…" : "Reading file…";
+      msgEl.textContent = "Reading file…";
+      msgEl.style.color = "";
     }
     const bank = $("#import-bank")?.value || "auto";
     const fd = new FormData();
     fd.append("file", file);
-    const qs = `commit=${commit ? "true" : "false"}&bank=${encodeURIComponent(bank)}`;
+    const qs = `commit=false&bank=${encodeURIComponent(bank)}`;
     const res = await fetch(`/api/import/statement?${qs}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${state.token}` },
@@ -1403,57 +1519,70 @@
       throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
     }
     const data = await res.json();
-    if (msgEl) {
-      msgEl.textContent = data.message || "";
-      msgEl.style.color = commit && data.imported > 0 ? "var(--success)" : "";
-    }
+    state.importCategories = data.categories || DEFAULT_IMPORT_CATS;
+    state.importBankLabel = data.bank_label || "Import";
+    state.importRows = (data.rows || []).map((r) => ({
+      date: r.date,
+      description: r.description,
+      amount: r.amount,
+      is_income: !!r.is_income,
+      category: r.category || (r.is_income ? "Income" : "Other"),
+      selected: r.selected !== false && !!r.date && r.amount > 0,
+      raw: r.raw || "",
+    }));
+    if (msgEl) msgEl.textContent = data.message || "Preview ready — select rows and categories.";
     const badge = $("#import-bank-badge");
     if (badge) {
       badge.innerHTML = data.bank_label
         ? `Detected / used: <strong class="text-primary">${escapeHtml(data.bank_label)}</strong>`
         : "";
     }
-    const tbody = $("#import-table tbody");
-    tbody.innerHTML = (data.rows || [])
-      .map((r) => {
-        const cls = r.is_income ? "positive" : "negative";
-        const warn = !r.date ? ' style="opacity:0.6"' : "";
-        return `<tr${warn}>
-          <td>${r.date || "— missing date"}</td>
-          <td>${escapeHtml(r.description)}</td>
-          <td class="num ${cls}">${money(r.amount)}</td>
-          <td>${r.is_income ? "In" : "Out"}</td>
-        </tr>`;
-      })
-      .join("") || `<tr><td colspan="4" class="text-muted">No rows parsed — try Bank: Chase for PDF statements, or check the file is a text PDF/CSV from online banking (not a photo).</td></tr>`;
+    renderImportTable();
+  }
 
-    if (commit) {
-      if (data.imported > 0) {
-        // Jump Home calendar to the month of the import (statements are often last month)
-        const jump = data.first_date || data.last_date;
-        if (jump) {
-          const d = new Date(String(jump) + "T12:00:00");
-          if (!Number.isNaN(d.getTime())) {
-            state.year = d.getFullYear();
-            state.month = d.getMonth() + 1;
-          }
-        }
-        alert(
-          `Saved ${data.imported} transaction(s) to your budget.\n\n` +
-            `They appear on Home for the statement dates` +
-            (data.first_date && data.last_date
-              ? ` (${data.first_date} → ${data.last_date})`
-              : "") +
-            `.\n\nSwitching to Home now — use the month arrows if needed.`
-        );
-        setView("dashboard");
-        await refreshDashboard();
-      } else {
-        alert(
-          "Nothing was saved. Rows may be missing dates or amounts. Check the preview table."
-        );
+  async function runImportSelected() {
+    const selected = state.importRows.filter((r) => r.selected && r.date && r.amount > 0);
+    if (!selected.length) {
+      throw new Error("Select at least one row with a date and amount.");
+    }
+    const msgEl = $("#import-msg");
+    if (msgEl) {
+      msgEl.textContent = `Saving ${selected.length} selected row(s)…`;
+      msgEl.style.color = "";
+    }
+    const payload = {
+      bank_label: state.importBankLabel || "Import",
+      rows: selected.map((r) => ({
+        date: r.date,
+        description: r.description,
+        amount: r.amount,
+        is_income: r.category === "Income" ? true : !!r.is_income,
+        category: r.category || "Other",
+        item_type: r.category === "Income" || r.is_income ? "paycheck" : "actual",
+      })),
+    };
+    const data = await api("/api/import/commit", {
+      method: "POST",
+      json: payload,
+    });
+    if (msgEl) {
+      msgEl.textContent = data.message || `Saved ${data.imported}`;
+      msgEl.style.color = "var(--success)";
+    }
+    const jump = data.first_date || data.last_date;
+    if (jump) {
+      const d = new Date(String(jump) + "T12:00:00");
+      if (!Number.isNaN(d.getTime())) {
+        state.year = d.getFullYear();
+        state.month = d.getMonth() + 1;
       }
     }
+    alert(
+      `${data.message || `Saved ${data.imported} item(s).`}\n\n` +
+        `Switching to Home for that month. Use month arrows if needed.`
+    );
+    setView("dashboard");
+    await refreshDashboard();
   }
 
   function escapeHtml(s) {
@@ -1626,18 +1755,27 @@
 
     $("#btn-preview-import").addEventListener("click", async () => {
       try {
-        await runImport(false);
+        await runImportPreview();
       } catch (ex) {
         $("#import-msg").textContent = ex.message;
       }
     });
     $("#btn-commit-import").addEventListener("click", async () => {
       try {
-        await runImport(true);
+        await runImportSelected();
       } catch (ex) {
         $("#import-msg").textContent = ex.message;
+        alert(ex.message || "Import failed");
       }
     });
+    const impAll = $("#btn-import-all");
+    const impNone = $("#btn-import-none");
+    const impInc = $("#btn-import-income");
+    const impExp = $("#btn-import-expenses");
+    if (impAll) impAll.addEventListener("click", () => setImportSelection("all"));
+    if (impNone) impNone.addEventListener("click", () => setImportSelection("none"));
+    if (impInc) impInc.addEventListener("click", () => setImportSelection("income"));
+    if (impExp) impExp.addEventListener("click", () => setImportSelection("expenses"));
 
     const closeBtn = $("#day-expand-close");
     if (closeBtn) closeBtn.addEventListener("click", () => closeDayExpand());

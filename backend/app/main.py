@@ -59,6 +59,8 @@ from .schemas import (
     MetricsResponse,
     PasswordChangeRequest,
     PayStubApplyRequest,
+    ImportCommitRequest,
+    ImportCommitResponse,
     SnapshotOut,
     StatementParseResponse,
     StatementRow,
@@ -66,6 +68,7 @@ from .schemas import (
 )
 from .bank_import import BANK_PRESETS, parse_bank_csv
 from .bank_pdf import parse_statement_pdf
+from .categorize import IMPORT_CATEGORIES, suggest_category
 from .seed import seed_if_empty
 
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -1274,35 +1277,39 @@ async def import_statement(
             amount=r.amount,
             is_income=r.is_income,
             raw=r.raw,
+            category=suggest_category(r.description, r.is_income),
+            selected=True,
         )
         for r in parsed
     ]
     skipped = sum(1 for r in rows if not r.date or r.amount <= 0)
 
-    imported = 0
     first_date = None
     last_date = None
     dated = [r for r in rows if r.date and r.amount > 0]
     if dated:
-        first_date = min(r.date for r in dated)
-        last_date = max(r.date for r in dated)
+        first_date = min(r.date for r in dated)  # type: ignore[arg-type]
+        last_date = max(r.date for r in dated)  # type: ignore[arg-type]
 
+    # Legacy commit=true still works (imports everything dated). Prefer /api/import/commit for selection.
+    imported = 0
     if commit:
         hh = get_household(db)
         label = BANK_PRESETS.get(detected, detected)
         fmt = "PDF" if is_pdf else "CSV"
         for r in dated:
+            item_type = "paycheck" if r.is_income else "actual"
             db.add(
                 BudgetItem(
                     household_id=hh.id,
                     name=r.description[:120],
-                    item_type="actual",
+                    item_type=item_type,
                     amount=r.amount,
                     is_income=r.is_income,
                     due_date=r.date,
                     frequency="once",
                     notes=f"Imported ({label} {fmt})",
-                    category="Imported",
+                    category=r.category or ("Income" if r.is_income else "Other"),
                 )
             )
             imported += 1
@@ -1323,9 +1330,12 @@ async def import_statement(
         else:
             suffix = " — nothing saved (rows missing dates or amounts)"
     else:
-        suffix = " — preview only (not saved yet). Click Import as actuals to save."
+        suffix = (
+            " — preview only. Check the rows you want, set a category bucket, "
+            "then click Import selected."
+        )
     if skipped:
-        suffix += f"; {skipped} row(s) missing date/amount skipped on save"
+        suffix += f"; {skipped} row(s) missing date/amount cannot be saved"
     if not rows:
         suffix += " — no transactions found"
     return StatementParseResponse(
@@ -1337,6 +1347,68 @@ async def import_statement(
         skipped=skipped,
         first_date=first_date,
         last_date=last_date,
+        categories=list(IMPORT_CATEGORIES),
+    )
+
+
+@app.post("/api/import/commit", response_model=ImportCommitResponse)
+def import_commit(
+    body: ImportCommitRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Save only the rows the user selected/categorized in the Import preview."""
+    if not body.rows:
+        raise HTTPException(status_code=400, detail="No rows selected to import")
+
+    hh = get_household(db)
+    imported = 0
+    dates: list = []
+    label = (body.bank_label or "Import").strip()[:80]
+
+    for r in body.rows:
+        if r.amount <= 0:
+            continue
+        is_income = bool(r.is_income) or r.category == "Income"
+        item_type = r.item_type if r.item_type in ("actual", "paycheck", "bill", "estimate") else "actual"
+        if is_income and item_type == "actual":
+            item_type = "paycheck"
+        if not is_income and item_type == "paycheck":
+            item_type = "actual"
+        cat = (r.category or "").strip() or ("Income" if is_income else "Other")
+        if cat not in IMPORT_CATEGORIES:
+            cat = "Other" if not is_income else "Income"
+
+        db.add(
+            BudgetItem(
+                household_id=hh.id,
+                name=r.description.strip()[:120],
+                item_type=item_type,
+                amount=float(r.amount),
+                is_income=is_income,
+                due_date=r.date,
+                frequency="once",
+                notes=f"Imported ({label})",
+                category=cat,
+            )
+        )
+        dates.append(r.date)
+        imported += 1
+
+    if imported == 0:
+        raise HTTPException(status_code=400, detail="No valid rows to import")
+
+    db.commit()
+    first_date = min(dates)
+    last_date = max(dates)
+    return ImportCommitResponse(
+        imported=imported,
+        first_date=first_date,
+        last_date=last_date,
+        message=(
+            f"Saved {imported} selected transaction(s) "
+            f"({first_date.isoformat()} → {last_date.isoformat()})."
+        ),
     )
 
 

@@ -829,6 +829,39 @@ h2 .help-icon,
   color: var(--text-secondary);
 }
 
+.import-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.import-table-wrap {
+  max-height: 420px;
+  overflow: auto;
+}
+
+#import-table select.import-cat {
+  width: 100%;
+  min-width: 9rem;
+  background: var(--bg-dark-2);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  padding: 0.35rem 0.45rem;
+}
+
+#import-table input.import-check {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
+#import-table tr.import-off {
+  opacity: 0.45;
+}
+
 /* Settings */
 .settings-grid {
   display: grid;

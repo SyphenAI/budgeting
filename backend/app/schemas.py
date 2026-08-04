@@ -154,6 +154,8 @@ class StatementRow(BaseModel):
     amount: float
     is_income: bool
     raw: str = ""
+    category: str = "Other"
+    selected: bool = True
 
 
 class StatementParseResponse(BaseModel):
@@ -164,6 +166,28 @@ class StatementParseResponse(BaseModel):
     bank_label: str = "Generic CSV"
     skipped: int = 0
     # Helps the UI jump the calendar to where imports landed
+    first_date: Optional[Date] = None
+    last_date: Optional[Date] = None
+    categories: list[str] = []
+
+
+class ImportCommitRow(BaseModel):
+    date: Date
+    description: str = Field(min_length=1, max_length=200)
+    amount: float = Field(gt=0)
+    is_income: bool = False
+    category: str = "Other"
+    item_type: str = "actual"  # actual | paycheck
+
+
+class ImportCommitRequest(BaseModel):
+    rows: list[ImportCommitRow]
+    bank_label: str = "Import"
+
+
+class ImportCommitResponse(BaseModel):
+    imported: int
+    message: str
     first_date: Optional[Date] = None
     last_date: Optional[Date] = None
 
