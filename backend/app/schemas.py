@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date as Date
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -66,7 +66,7 @@ class BudgetItemOut(BaseModel):
     item_type: str
     amount: float
     is_income: bool
-    due_date: date
+    due_date: Date
     frequency: str
     notes: str
     is_paid: bool
@@ -81,7 +81,7 @@ class BudgetItemCreate(BaseModel):
     item_type: ItemType = "bill"
     amount: float = Field(gt=0)
     is_income: bool = False
-    due_date: date
+    due_date: Date
     frequency: Frequency = "once"
     notes: str = ""
     is_paid: bool = False
@@ -94,7 +94,7 @@ class BudgetItemUpdate(BaseModel):
     item_type: Optional[ItemType] = None
     amount: Optional[float] = None
     is_income: Optional[bool] = None
-    due_date: Optional[date] = None
+    due_date: Optional[Date] = None
     frequency: Optional[Frequency] = None
     notes: Optional[str] = None
     is_paid: Optional[bool] = None
@@ -102,7 +102,7 @@ class BudgetItemUpdate(BaseModel):
 
 
 class CalendarDay(BaseModel):
-    date: date
+    date: Date
     items: list[BudgetItemOut]
     # Planned path (bills + estimates + pay + actuals); orange in UI
     running_balance_est: float
@@ -149,7 +149,7 @@ class UpcomingResponse(BaseModel):
 
 
 class StatementRow(BaseModel):
-    date: Optional[date] = None
+    date: Optional[Date] = None
     description: str
     amount: float
     is_income: bool
@@ -171,7 +171,7 @@ class GoalCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     target_amount: float = Field(gt=0)
     current_amount: float = Field(default=0, ge=0)
-    target_date: Optional[date] = None
+    target_date: Optional[Date] = None
     monthly_contribution: float = Field(default=0, ge=0)
     notes: str = ""
 
@@ -180,7 +180,7 @@ class GoalUpdate(BaseModel):
     name: Optional[str] = None
     target_amount: Optional[float] = None
     current_amount: Optional[float] = None
-    target_date: Optional[date] = None
+    target_date: Optional[Date] = None
     monthly_contribution: Optional[float] = None
     notes: Optional[str] = None
 
@@ -190,14 +190,14 @@ class GoalOut(BaseModel):
     name: str
     target_amount: float
     current_amount: float
-    target_date: Optional[date] = None
+    target_date: Optional[Date] = None
     monthly_contribution: float
     notes: str
     remaining: float
     percent: float
     months_to_target: Optional[int] = None
     suggested_monthly: Optional[float] = None
-    eta_date: Optional[date] = None
+    eta_date: Optional[Date] = None
     on_track: Optional[bool] = None
 
     class Config:
@@ -299,7 +299,7 @@ class InvestmentOut(BaseModel):
     cost_basis: float
     monthly_contribution: float
     notes: str
-    last_updated: Optional[date] = None
+    last_updated: Optional[Date] = None
     gain_loss: float = 0.0
     gain_loss_pct: Optional[float] = None
 
@@ -353,7 +353,7 @@ class JobPayCreate(BaseModel):
     frequency: Literal["weekly", "biweekly", "semimonthly", "monthly"] = "biweekly"
     gross_pay: float = Field(default=0, ge=0)
     net_pay: float = Field(default=0, ge=0)
-    last_pay_date: Optional[date] = None
+    last_pay_date: Optional[Date] = None
     monthly_net_estimate: float = Field(default=0, ge=0)
     notes: str = ""
 
@@ -365,10 +365,10 @@ class JobPayOut(BaseModel):
     frequency: str
     gross_pay: float
     net_pay: float
-    last_pay_date: Optional[date] = None
+    last_pay_date: Optional[Date] = None
     monthly_net_estimate: float
     notes: str
-    next_pay_dates: list[date] = []
+    next_pay_dates: list[Date] = []
 
     class Config:
         from_attributes = True
@@ -380,7 +380,7 @@ class PayStubApplyRequest(BaseModel):
     employer: str = "Paycheck"
     net_pay: float = Field(gt=0)
     gross_pay: float = Field(default=0, ge=0)
-    pay_date: date
+    pay_date: Date
     frequency: Literal["weekly", "biweekly", "semimonthly", "monthly"] = "biweekly"
     create_paycheck: bool = True
     save_job_profile: bool = True
