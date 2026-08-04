@@ -65,6 +65,7 @@ from .schemas import (
     UpcomingResponse,
 )
 from .bank_import import BANK_PRESETS, parse_bank_csv
+from .bank_pdf import parse_statement_pdf
 from .seed import seed_if_empty
 
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -1225,13 +1226,16 @@ def delete_job(
 
 @app.get("/api/import/banks")
 def list_import_banks(user: User = Depends(current_user)):
-    """Supported bank CSV presets for the import UI."""
+    """Supported bank import presets."""
     return {
         "banks": [
             {"id": k, "label": v}
             for k, v in BANK_PRESETS.items()
         ],
-        "note": "CSV activity export only — not PDF statements. Auto-detect works for most files.",
+        "note": (
+            "CSV for most banks. Chase monthly statements also support PDF "
+            "(text PDFs from online banking). Always Preview before import."
+        ),
     }
 
 
@@ -1244,17 +1248,24 @@ async def import_statement(
     db: Session = Depends(get_db),
 ):
     """
-    Parse bank activity CSV exports.
-    Built for: Chase, Bank of America, Wells Fargo, Citi, U.S. Bank (+ generic/auto).
+    Parse bank activity CSV or Chase PDF statements.
+    PDF path is local text extract only (no OCR).
     """
     raw = await file.read()
     if not raw:
         raise HTTPException(status_code=400, detail="Empty file")
 
+    fname = (file.filename or "").lower()
+    is_pdf = raw[:4] == b"%PDF" or fname.endswith(".pdf")
+
     try:
-        parsed, detected, msg = parse_bank_csv(raw, bank=bank)
+        if is_pdf:
+            parsed, detected, msg = parse_statement_pdf(raw, bank=bank)
+        else:
+            parsed, detected, msg = parse_bank_csv(raw, bank=bank)
     except Exception as ex:
-        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {ex}") from ex
+        kind = "PDF" if is_pdf else "CSV"
+        raise HTTPException(status_code=400, detail=f"Could not parse {kind}: {ex}") from ex
 
     rows = [
         StatementRow(
@@ -1272,6 +1283,7 @@ async def import_statement(
     if commit:
         hh = get_household(db)
         label = BANK_PRESETS.get(detected, detected)
+        fmt = "PDF" if is_pdf else "CSV"
         for r in rows:
             if not r.date or r.amount <= 0:
                 continue
@@ -1284,7 +1296,7 @@ async def import_statement(
                     is_income=r.is_income,
                     due_date=r.date,
                     frequency="once",
-                    notes=f"Imported ({label})",
+                    notes=f"Imported ({label} {fmt})",
                     category="Imported",
                 )
             )
@@ -1292,11 +1304,15 @@ async def import_statement(
         db.commit()
 
     bank_label = BANK_PRESETS.get(detected, detected)
+    if is_pdf and detected == "chase":
+        bank_label = "Chase (PDF statement)"
     suffix = f"; imported {imported}" if commit else " — preview only (not saved yet)"
     if skipped:
         suffix += f"; {skipped} row(s) missing date/amount skipped on save"
+    if not rows:
+        suffix += " — no transactions found"
     return StatementParseResponse(
-        rows=rows[:300],
+        rows=rows[:400],
         imported=imported,
         message=msg + suffix,
         bank=detected,

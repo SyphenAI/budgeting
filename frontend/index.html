@@ -730,34 +730,34 @@
             <div>
               <span class="section-label">Actuals</span>
               <h1>Import bank statement
-                <button type="button" class="help-icon" data-help="Upload a CSV download from online banking (not a PDF). Built for Chase, Bank of America, Wells Fargo, Citi, and U.S. Bank. Everything stays on this computer — Preview first, then import.">?</button>
+                <button type="button" class="help-icon" data-help="Upload a CSV from online banking, or a Chase monthly statement PDF (text PDF from Chase.com). Everything stays on this computer — always Preview first, then import.">?</button>
               </h1>
-              <div class="sub">CSV only · Chase · Bank of America · Wells Fargo · Citi · U.S. Bank</div>
+              <div class="sub">CSV for major banks · Chase also accepts PDF monthly statements</div>
             </div>
           </div>
           <div class="form-panel" style="max-width:960px">
-            <div class="form-group" style="max-width:360px">
+            <div class="form-group" style="max-width:420px">
               <label for="import-bank">Bank
-                <button type="button" class="help-icon" data-help="Auto-detect works for most CSVs. If Preview looks wrong, pick your bank and try again. You use Chase — that layout is included.">?</button>
+                <button type="button" class="help-icon" data-help="Auto-detect works for most files. For Chase PDF statements, pick Chase or leave Auto. Always Preview and check In/Out before importing.">?</button>
               </label>
               <select id="import-bank">
                 <option value="auto" selected>Auto-detect</option>
-                <option value="chase">Chase</option>
-                <option value="bank_of_america">Bank of America</option>
-                <option value="wells_fargo">Wells Fargo</option>
-                <option value="citi">Citi</option>
-                <option value="us_bank">U.S. Bank</option>
+                <option value="chase">Chase (CSV or PDF statement)</option>
+                <option value="bank_of_america">Bank of America (CSV)</option>
+                <option value="wells_fargo">Wells Fargo (CSV)</option>
+                <option value="citi">Citi (CSV)</option>
+                <option value="us_bank">U.S. Bank (CSV)</option>
                 <option value="generic">Generic CSV</option>
               </select>
             </div>
             <div class="import-zone">
-              <p class="text-primary" style="font-weight:600">CSV from online banking
-                <button type="button" class="help-icon" data-help="Chase: account → download. BofA: activity → download. Wells: account activity → comma delimited. Citi / U.S. Bank: export/download transactions. Choose CSV or spreadsheet, not PDF.">?</button>
+              <p class="text-primary" style="font-weight:600">CSV or Chase PDF
+                <button type="button" class="help-icon" data-help="Chase monthly statement: download the PDF from online banking (not a phone photo). Other banks: prefer CSV export when available. Scanned image PDFs usually will not work.">?</button>
               </p>
               <p class="text-secondary" style="font-size:0.9rem;margin-top:0.35rem">
-                Date + description + amount (or debit/credit). PDFs are not supported.
+                Chase PDF statements and multi-bank CSVs. Preview before you import.
               </p>
-              <input type="file" id="statement-file" accept=".csv,text/csv,.txt" />
+              <input type="file" id="statement-file" accept=".csv,text/csv,.txt,.pdf,application/pdf" />
             </div>
             <div style="display:flex;gap:0.65rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
               <button class="btn btn-outline" type="button" id="btn-preview-import">Preview</button>

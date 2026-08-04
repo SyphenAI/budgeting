@@ -20,11 +20,11 @@ from typing import Optional
 
 BANK_PRESETS = {
     "auto": "Auto-detect",
-    "chase": "Chase",
-    "bank_of_america": "Bank of America",
-    "wells_fargo": "Wells Fargo",
-    "citi": "Citi",
-    "us_bank": "U.S. Bank",
+    "chase": "Chase (CSV or PDF statement)",
+    "bank_of_america": "Bank of America (CSV)",
+    "wells_fargo": "Wells Fargo (CSV)",
+    "citi": "Citi (CSV)",
+    "us_bank": "U.S. Bank (CSV)",
     "generic": "Generic CSV",
 }
 
