@@ -63,35 +63,45 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo  [3/3] Creating a desktop shortcut (optional)...
+echo  [3/3] Creating a desktop shortcut with app logo...
+set "APP_DIR=%~dp0"
 set "START_BAT=%~dp0start.bat"
+set "APP_ICON=%~dp0brand\assets\household-money.ico"
 set "SHORTCUT_OK=0"
 
-REM Resolve real Desktop (OneDrive-aware)
-for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "[Environment]::GetFolderPath('Desktop')"`) do set "DESKTOP=%%D"
-
-if defined DESKTOP if exist "%DESKTOP%" (
-  set "SHORTCUT=%DESKTOP%\Household Money.lnk"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "try { $ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut($env:SHORTCUT); $s.TargetPath = $env:START_BAT; $s.WorkingDirectory = (Split-Path -Parent $env:START_BAT); $s.WindowStyle = 1; $s.Description = 'Start Household Money'; $s.Save(); exit 0 } catch { exit 1 }" 2>nul
-  if not errorlevel 1 (
-    if exist "%DESKTOP%\Household Money.lnk" set "SHORTCUT_OK=1"
-  )
+if not exist "%APP_ICON%" (
+  echo        Logo icon file missing - shortcut will use default icon.
 )
 
-REM Fallback: shortcut inside this app folder
-if "%SHORTCUT_OK%"=="0" (
-  set "SHORTCUT=%~dp0Household Money.lnk"
-  powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "try { $ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut('%SHORTCUT%'); $s.TargetPath = '%START_BAT%'; $s.WorkingDirectory = '%~dp0'; $s.WindowStyle = 1; $s.Description = 'Start Household Money'; $s.Save(); exit 0 } catch { exit 1 }" 2>nul
-  if exist "%~dp0Household Money.lnk" (
-    set "SHORTCUT_OK=1"
-    echo        Desktop shortcut skipped - created "Household Money.lnk" in this folder instead.
-  ) else (
-    echo        Shortcut could not be created - that is OK. Use start.bat instead.
-  )
+REM Resolve real Desktop (OneDrive-aware) and create shortcut with logo
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "$startBat = $env:START_BAT; $icon = $env:APP_ICON; $appDir = $env:APP_DIR;" ^
+  "$desktop = [Environment]::GetFolderPath('Desktop');" ^
+  "$targets = @();" ^
+  "if ($desktop -and (Test-Path $desktop)) { $targets += (Join-Path $desktop 'Household Money.lnk') };" ^
+  "$targets += (Join-Path $appDir 'Household Money.lnk');" ^
+  "$ws = New-Object -ComObject WScript.Shell;" ^
+  "$made = $false;" ^
+  "foreach ($path in $targets) {" ^
+  "  try {" ^
+  "    $s = $ws.CreateShortcut($path);" ^
+  "    $s.TargetPath = $startBat;" ^
+  "    $s.WorkingDirectory = $appDir;" ^
+  "    $s.WindowStyle = 1;" ^
+  "    $s.Description = 'Household Money budget app';" ^
+  "    if ($icon -and (Test-Path $icon)) { $s.IconLocation = $icon + ',0' };" ^
+  "    $s.Save();" ^
+  "    if (Test-Path $path) { Write-Output ('CREATED:' + $path); $made = $true; break }" ^
+  "  } catch { }" ^
+  "};" ^
+  "if (-not $made) { exit 1 }"
+
+if errorlevel 1 (
+  echo        Shortcut could not be created - that is OK. Use start.bat instead.
 ) else (
-  echo        Desktop shortcut created: Household Money
+  set "SHORTCUT_OK=1"
+  echo        Shortcut created with app logo.
 )
 
 echo.

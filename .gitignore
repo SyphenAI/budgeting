@@ -11,6 +11,8 @@ github_pat.txt
 # Personal financial documents
 *.pdf
 !brand/**/*.pdf
+# Keep brand icons (including .ico for desktop shortcut)
+!brand/assets/*.ico
 private/
 paystubs/
 statements/
