@@ -313,10 +313,27 @@
     $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
     if (name === "dashboard") refreshDashboard();
     if (name === "input") refreshInput();
+    if (name === "import") refreshImportHint();
     if (name === "goals") refreshGoals();
     if (name === "debts") refreshDebts();
     if (name === "invest") refreshInvestments();
     if (name === "settings") refreshSettings();
+  }
+
+  async function refreshImportHint() {
+    const el = $("#import-version-hint");
+    if (!el) return;
+    try {
+      const v = await api("/api/version");
+      if (v.chase_pdf_import) {
+        el.innerHTML = `App version <strong class="text-primary">${escapeHtml(v.version)}</strong> · Chase PDF import is available. Pick your PDF, bank Chase or Auto, then Preview.`;
+      } else {
+        el.innerHTML =
+          `<span class="text-danger">This install is missing Chase PDF support. Close the app, run <strong>update.bat</strong>, then start.bat again. Hard-refresh the browser (Ctrl+F5).</span>`;
+      }
+    } catch (_) {
+      el.textContent = "";
+    }
   }
 
   // ── Dashboard ───────────────────────────────────────────────
@@ -1404,7 +1421,7 @@
           <td>${r.is_income ? "In" : "Out"}</td>
         </tr>`;
       })
-      .join("") || `<tr><td colspan="4" class="text-muted">No rows parsed — try picking your bank above, or confirm the file is CSV not PDF.</td></tr>`;
+      .join("") || `<tr><td colspan="4" class="text-muted">No rows parsed — try Bank: Chase for PDF statements, or check the file is a text PDF/CSV from online banking (not a photo).</td></tr>`;
     if (commit) await refreshDashboard();
   }
 

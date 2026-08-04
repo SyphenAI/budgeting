@@ -139,9 +139,12 @@ echo.
 echo  Your budget data was kept in the data folder.
 echo.
 echo  Next:
-echo    1. Right-click start.bat -^> Run as administrator
-echo    2. Sign in as usual
+echo    1. Close ALL Household Money windows completely
+echo    2. Right-click start.bat -^> Run as administrator
+echo    3. In the browser press Ctrl+F5 (hard refresh) so old pages clear
+echo    4. Sign in as usual
 echo.
+echo  Import should say Chase PDF is available (version file in this folder).
 echo  If start fails, run install.bat once, then start.bat.
 echo.
 del "%ZIP%" >nul 2>&1

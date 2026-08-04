@@ -1335,4 +1335,24 @@ def index():
     index_path = FRONTEND / "index.html"
     if not index_path.exists():
         return {"message": "Frontend missing", "path": str(index_path)}
-    return FileResponse(index_path)
+    # Avoid browsers keeping an old Import page after update.bat
+    return FileResponse(
+        index_path,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/api/version")
+def app_version():
+    ver_path = ROOT / "VERSION"
+    ver = "unknown"
+    if ver_path.exists():
+        ver = ver_path.read_text(encoding="utf-8").strip() or "unknown"
+    return {
+        "version": ver,
+        "chase_pdf_import": (ROOT / "backend" / "app" / "bank_pdf.py").exists(),
+    }
