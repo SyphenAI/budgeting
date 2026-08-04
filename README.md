@@ -182,6 +182,30 @@ Change your password under **Household**, and use the 10-minute auto sign-out (a
 
 ---
 
+## Getting a newer version (update)
+
+When we release improvements, you can update **without losing your budget**.
+
+1. Close the app (close any “Household Money - keep open” window)  
+2. Open your app folder  
+3. Right-click **`update.bat`** → **Run as administrator**  
+4. Read the message, then press a key to continue  
+5. Wait until it says **Update finished**  
+6. Right-click **`start.bat`** → **Run as administrator**  
+
+**What update does**
+- Downloads the latest app from the official GitHub page only  
+- Replaces program files  
+- **Keeps** your `data` folder (balances, logins, entries)  
+- Does **not** run in the background every time you start the app — you choose when to update  
+
+**If update fails**
+- Download a fresh ZIP from GitHub  
+- Copy your old `data` folder into the new folder  
+- Run `install.bat`, then `start.bat`  
+
+---
+
 ## For helpers / advanced users only
 
 Command-line and Docker instructions are optional. Most people should use **`install.bat`** and **`start.bat`** only.

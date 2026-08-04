@@ -19,3 +19,8 @@ App address in the browser: **http://127.0.0.1:8787**
 ### Windows Defender
 
 Many PCs block `.bat` files until you allow them. Use **Run as administrator**, or **More info → Run anyway** on SmartScreen. Details are in the README section **“Windows Defender / blocked messages”**.
+
+### Updates later
+
+Right-click **`update.bat`** → **Run as administrator**.  
+That pulls the latest app from GitHub and **keeps your data folder**. See README → **Getting a newer version**.

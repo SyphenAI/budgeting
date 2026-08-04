@@ -90,5 +90,8 @@ echo.
 echo  Keep the other window open while you use the app.
 echo  You can close THIS window now.
 echo.
+echo  To install a newer version later (keeps your data):
+echo    right-click update.bat -^> Run as administrator
+echo.
 pause
 endlocal
