@@ -49,6 +49,15 @@ def migrate_sqlite() -> None:
                         "WHERE last_seen IS NULL"
                     )
                 )
+        if "households" in insp.get_table_names():
+            hcols = {c["name"] for c in insp.get_columns("households")}
+            if "safety_threshold" not in hcols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE households ADD COLUMN safety_threshold "
+                        "FLOAT NOT NULL DEFAULT 0"
+                    )
+                )
 
 
 def get_db():

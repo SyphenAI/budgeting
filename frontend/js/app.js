@@ -338,9 +338,44 @@
     }
     renderSnapshot(snap);
     renderStats(metrics, cal);
+    renderThresholdBanner(cal);
     renderCalendar(cal);
     renderCharts(metrics);
     renderUpcoming(upcoming.items || []);
+  }
+
+  function renderThresholdBanner(cal) {
+    const el = $("#threshold-banner");
+    if (!el) return;
+    const thr = Number(cal.safety_threshold || 0);
+    const estDays = Number(cal.warn_days_est || 0);
+    const actDays = Number(cal.warn_days_actual || 0);
+    if (thr <= 0) {
+      el.style.display = "none";
+      el.textContent = "";
+      return;
+    }
+    if (estDays <= 0 && actDays <= 0) {
+      el.style.display = "none";
+      el.className = "alert alert-success";
+      el.style.display = "block";
+      el.textContent = `Safety check: no days this month fall at or below ${money(thr)}.`;
+      return;
+    }
+    el.className = "alert alert-warning";
+    el.style.display = "block";
+    const parts = [];
+    if (estDays > 0) {
+      parts.push(
+        `${estDays} day${estDays === 1 ? "" : "s"} where planned (est) balance is at or below ${money(thr)}`
+      );
+    }
+    if (actDays > 0) {
+      parts.push(
+        `${actDays} day${actDays === 1 ? "" : "s"} where confirmed (act) balance is at or below ${money(thr)}`
+      );
+    }
+    el.textContent = `Safety warning: ${parts.join(" · ")}. Change the amount under Household.`;
   }
 
   function setHouseholdNameDisplay(name) {
@@ -539,9 +574,24 @@
       const anchor = day.balance_anchored
         ? `<span class="cal-anchor-dot" title="Bank balance set this day"></span>`
         : "";
+      const warnEst = !!day.warn_est;
+      const warnAct = !!day.warn_actual;
+      const warnClass = `${warnEst ? "warn-est" : ""} ${warnAct ? "warn-act" : ""}`.trim();
+      let warnBadge = "";
+      if (warnAct) {
+        warnBadge = `<span class="cal-warn-badge act" title="Confirmed balance at or below your safety amount">Low act</span>`;
+      } else if (warnEst) {
+        warnBadge = `<span class="cal-warn-badge est" title="Planned balance at or below your safety amount">Low est</span>`;
+      }
+      const ariaWarn = warnAct
+        ? " low confirmed balance"
+        : warnEst
+          ? " low planned balance"
+          : "";
 
       html += `
-        <div class="cal-cell ${isToday ? "today" : ""} ${selected}" data-date="${day.date}" role="button" tabindex="0" aria-label="Open ${day.date}">
+        <div class="cal-cell ${isToday ? "today" : ""} ${selected} ${warnClass}" data-date="${day.date}" role="button" tabindex="0" aria-label="Open ${day.date}${ariaWarn}">
+          ${warnBadge}
           <div class="cal-daynum">${dayNum}</div>
           <div class="cal-pills">${pills}${more}</div>
           <div class="cal-balance-row">
@@ -605,9 +655,38 @@
       <span class="act">act ${money(act)}</span>
       <span class="est">est ${money(est)}</span>
     `;
-    $("#day-expand-sub").textContent = day.balance_anchored
+    const thr = Number(state.calendar.safety_threshold || 0);
+    let sub = day.balance_anchored
       ? "Bank balance was set this day — running totals restart from that amount."
       : `${day.items.length} item${day.items.length === 1 ? "" : "s"} · click the day again to close`;
+    if (thr > 0 && (day.warn_actual || day.warn_est)) {
+      const bits = [];
+      if (day.warn_actual) bits.push("confirmed (act)");
+      if (day.warn_est) bits.push("planned (est)");
+      sub =
+        `Below your safety amount of ${money(thr)} on ${bits.join(" and ")} balance. ` +
+        sub;
+    }
+    $("#day-expand-sub").textContent = sub;
+
+    // Optional alert block under day header
+    let warnEl = panel.querySelector(".day-expand-warn");
+    if (!warnEl) {
+      warnEl = document.createElement("div");
+      warnEl.className = "day-expand-warn";
+      const body = panel.querySelector(".day-expand-body");
+      if (body) panel.insertBefore(warnEl, body);
+    }
+    if (thr > 0 && (day.warn_actual || day.warn_est)) {
+      warnEl.className = `day-expand-warn alert ${day.warn_actual ? "alert-danger" : "alert-warning"}`;
+      warnEl.style.display = "block";
+      warnEl.textContent = day.warn_actual
+        ? `Safety warning: confirmed cash is at or below ${money(thr)} on this day.`
+        : `Safety warning: planned cash (est) is at or below ${money(thr)} on this day.`;
+    } else {
+      warnEl.style.display = "none";
+      warnEl.textContent = "";
+    }
 
     const tbody = $("#day-expand-table tbody");
     if (!day.items.length) {
@@ -1090,6 +1169,10 @@
     ]);
     $("#hh-name").value = hh.name;
     $("#hh-balance").value = hh.starting_balance;
+    if ($("#hh-threshold")) {
+      $("#hh-threshold").value =
+        hh.safety_threshold != null ? hh.safety_threshold : 0;
+    }
     const list = $("#members-list");
     const meName = (state.user && (state.user.username || "")).toLowerCase();
     if (list) {
@@ -1330,11 +1413,13 @@
       e.preventDefault();
       const msg = $("#settings-msg");
       try {
+        const thrRaw = $("#hh-threshold") ? parseFloat($("#hh-threshold").value) : 0;
         await api("/api/household", {
           method: "PATCH",
           json: {
             name: $("#hh-name").value.trim(),
             starting_balance: parseFloat($("#hh-balance").value),
+            safety_threshold: Number.isFinite(thrRaw) ? Math.max(thrRaw, 0) : 0,
           },
         });
         msg.textContent = "Saved.";

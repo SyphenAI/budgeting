@@ -32,6 +32,7 @@ class HouseholdOut(BaseModel):
     id: int
     name: str
     starting_balance: float
+    safety_threshold: float = 0.0
     currency: str
 
     class Config:
@@ -41,6 +42,7 @@ class HouseholdOut(BaseModel):
 class HouseholdUpdate(BaseModel):
     name: Optional[str] = None
     starting_balance: Optional[float] = None
+    safety_threshold: Optional[float] = None
 
 
 class ItemNameOut(BaseModel):
@@ -110,6 +112,9 @@ class CalendarDay(BaseModel):
     day_delta_actual: float
     # True if a bank-balance entry reset the actual track on this day
     balance_anchored: bool = False
+    # Safety threshold warnings (at or below user threshold)
+    warn_est: bool = False
+    warn_actual: bool = False
     # Legacy alias = estimate running (older clients)
     running_balance: float
     day_delta: float
@@ -122,6 +127,9 @@ class CalendarResponse(BaseModel):
     ending_balance: float
     ending_balance_est: float
     ending_balance_actual: float
+    safety_threshold: float = 0.0
+    warn_days_est: int = 0
+    warn_days_actual: int = 0
     days: list[CalendarDay]
 
 

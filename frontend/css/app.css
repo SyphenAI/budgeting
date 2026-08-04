@@ -498,6 +498,49 @@ h2 .help-icon,
   box-shadow: inset 0 0 0 2px var(--brand);
 }
 
+/* Safety threshold warnings */
+.cal-cell.warn-est {
+  background: rgba(210, 153, 34, 0.10);
+  box-shadow: inset 0 0 0 1px rgba(210, 153, 34, 0.45);
+}
+.cal-cell.warn-act {
+  background: rgba(248, 81, 73, 0.10);
+  box-shadow: inset 0 0 0 1.5px rgba(248, 81, 73, 0.55);
+}
+.cal-cell.warn-act.warn-est {
+  background: rgba(248, 81, 73, 0.12);
+  box-shadow: inset 0 0 0 1.5px rgba(248, 81, 73, 0.6);
+}
+.cal-cell.selected.warn-est,
+.cal-cell.selected.warn-act {
+  box-shadow: inset 0 0 0 2px var(--brand);
+}
+.cal-warn-badge {
+  position: absolute;
+  top: 0.3rem;
+  right: 0.3rem;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.3rem;
+  border-radius: 4px;
+  line-height: 1.2;
+}
+.cal-warn-badge.est {
+  background: rgba(210, 153, 34, 0.22);
+  color: #e3b341;
+  border: 1px solid rgba(210, 153, 34, 0.4);
+}
+.cal-warn-badge.act {
+  background: rgba(248, 81, 73, 0.22);
+  color: #f85149;
+  border: 1px solid rgba(248, 81, 73, 0.45);
+}
+.day-expand-warn {
+  margin: 0 1rem 0.75rem;
+}
+
 .cal-balance-row {
   margin-top: auto;
   display: flex;

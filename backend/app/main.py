@@ -225,6 +225,9 @@ def household_update(
         hh.name = body.name
     if body.starting_balance is not None:
         hh.starting_balance = body.starting_balance
+    if body.safety_threshold is not None:
+        # 0 disables warnings; never store negative
+        hh.safety_threshold = max(float(body.safety_threshold), 0.0)
     db.commit()
     db.refresh(hh)
     return hh
@@ -508,13 +511,22 @@ def calendar(
     for it in items:
         by_day.setdefault(it.due_date, []).append(it)
 
+    threshold = float(getattr(hh, "safety_threshold", 0) or 0)
     days: list[CalendarDay] = []
+    warn_est_count = 0
+    warn_act_count = 0
     for day_n in range(1, last + 1):
         d = date(year, month, day_n)
         day_items = by_day.get(d, [])
         running_est, running_actual, delta_est, delta_actual, anchored = _apply_day_balances(
             day_items, running_est, running_actual
         )
+        warn_est = threshold > 0 and running_est <= threshold
+        warn_act = threshold > 0 and running_actual <= threshold
+        if warn_est:
+            warn_est_count += 1
+        if warn_act:
+            warn_act_count += 1
         days.append(
             CalendarDay(
                 date=d,
@@ -524,6 +536,8 @@ def calendar(
                 running_balance_actual=round(running_actual, 2),
                 day_delta_actual=round(delta_actual, 2),
                 balance_anchored=anchored,
+                warn_est=warn_est,
+                warn_actual=warn_act,
                 running_balance=round(running_est, 2),
                 day_delta=round(delta_est, 2),
             )
@@ -536,6 +550,9 @@ def calendar(
         ending_balance=round(running_est, 2),
         ending_balance_est=round(running_est, 2),
         ending_balance_actual=round(running_actual, 2),
+        safety_threshold=threshold,
+        warn_days_est=warn_est_count,
+        warn_days_actual=warn_act_count,
         days=days,
     )
 
