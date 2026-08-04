@@ -180,9 +180,21 @@ class ImportCommitRow(BaseModel):
     item_type: str = "actual"  # actual | paycheck
 
 
+class ImportDebtLink(BaseModel):
+    """Optional credit-card debt for paydown math (APR etc.)."""
+
+    name: str = Field(min_length=1, max_length=120)
+    apr: float = Field(default=0, ge=0, le=100)  # annual % e.g. 22.9
+    balance: float = Field(default=0, ge=0)  # remaining balance if known
+    min_payment: float = Field(default=0, ge=0)
+    # If true and debt exists, update APR/min/balance when provided
+    update_existing: bool = True
+
+
 class ImportCommitRequest(BaseModel):
     rows: list[ImportCommitRow]
     bank_label: str = "Import"
+    debts: list[ImportDebtLink] = []
 
 
 class ImportCommitResponse(BaseModel):
@@ -190,6 +202,8 @@ class ImportCommitResponse(BaseModel):
     message: str
     first_date: Optional[Date] = None
     last_date: Optional[Date] = None
+    debts_updated: int = 0
+    debts_created: int = 0
 
 
 # ── Goals ──────────────────────────────────────────────────────────

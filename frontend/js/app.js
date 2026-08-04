@@ -19,6 +19,7 @@
     importRows: [],
     importCategories: [],
     importBankLabel: "Import",
+    importDebts: [], // { key, name, apr, balance, min_payment }
   };
 
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -1421,6 +1422,122 @@
     el.textContent = total ? `${n} of ${total} selected` : "";
   }
 
+  function isCreditCardRow(r) {
+    const cat = (r.category || "").toLowerCase();
+    if (cat.includes("credit card") || cat === "debt payment") return true;
+    const d = (r.description || "").toLowerCase();
+    return (
+      d.includes("payment to chase card") ||
+      d.includes("credit crd") ||
+      d.includes("crcardpmt") ||
+      d.includes("citi autopay") ||
+      d.includes("card ending") ||
+      d.includes("capital one") ||
+      d.includes("synchrony")
+    );
+  }
+
+  function suggestCardName(description) {
+    const d = String(description || "");
+    const end = d.match(/card ending\s*(?:in\s*)?(\d{4})/i);
+    if (end) {
+      let brand = "Card";
+      if (/chase/i.test(d)) brand = "Chase";
+      else if (/citi/i.test(d)) brand = "Citi";
+      else if (/capital one/i.test(d)) brand = "Capital One";
+      return `${brand} Card …${end[1]}`;
+    }
+    if (/chase credit crd|chase credit card/i.test(d)) return "Chase Credit Card";
+    if (/citi autopay|citi card/i.test(d)) return "Citi Card";
+    if (/capital one/i.test(d)) return "Capital One";
+    if (/synchrony/i.test(d)) return "Synchrony";
+    if (/usaa/i.test(d) && /cc|payment/i.test(d)) return "USAA Credit Card";
+    if (/amex|american express/i.test(d)) return "Amex";
+    if (/discover/i.test(d)) return "Discover";
+    return d.split(/\s+/).slice(0, 4).join(" ").slice(0, 80) || "Credit card";
+  }
+
+  function rebuildImportDebtsFromSelection() {
+    const prev = {};
+    (state.importDebts || []).forEach((d) => {
+      prev[d.key] = d;
+    });
+    const map = new Map();
+    state.importRows.forEach((r) => {
+      if (!r.selected || !r.date || !(r.amount > 0)) return;
+      if (!isCreditCardRow(r)) return;
+      const name = suggestCardName(r.description);
+      const key = name.toLowerCase();
+      if (!map.has(key)) {
+        const old = prev[key];
+        map.set(key, {
+          key,
+          name: old?.name || name,
+          apr: old?.apr ?? "",
+          balance: old?.balance ?? "",
+          min_payment: old?.min_payment ?? "",
+        });
+      }
+    });
+    state.importDebts = [...map.values()];
+    renderImportDebtPanel();
+  }
+
+  function renderImportDebtPanel() {
+    const panel = $("#import-debt-panel");
+    const tbody = $("#import-debt-table tbody");
+    if (!panel || !tbody) return;
+    if (!state.importDebts.length) {
+      panel.style.display = "none";
+      tbody.innerHTML = "";
+      return;
+    }
+    panel.style.display = "block";
+    tbody.innerHTML = state.importDebts
+      .map(
+        (d, i) => `<tr data-debt-idx="${i}">
+          <td><input type="text" data-debt-name="${i}" value="${escapeAttr(d.name)}" style="width:100%;background:var(--bg-dark-2);border:1px solid var(--border-hover);border-radius:var(--radius);color:var(--text-primary);padding:0.35rem 0.5rem;font-size:0.85rem" /></td>
+          <td class="num"><input class="input-money" type="number" min="0" max="100" step="0.01" placeholder="22.9" data-debt-apr="${i}" value="${escapeAttr(d.apr)}" style="width:5.5rem" /></td>
+          <td class="num"><input class="input-money" type="number" min="0" step="0.01" placeholder="optional" data-debt-bal="${i}" value="${escapeAttr(d.balance)}" style="width:7rem" /></td>
+          <td class="num"><input class="input-money" type="number" min="0" step="0.01" placeholder="optional" data-debt-min="${i}" value="${escapeAttr(d.min_payment)}" style="width:7rem" /></td>
+        </tr>`
+      )
+      .join("");
+
+    const bind = (sel, field) => {
+      tbody.querySelectorAll(sel).forEach((inp) => {
+        inp.addEventListener("input", () => {
+          const i = Number(inp.dataset[field === "name" ? "debtName" : field === "apr" ? "debtApr" : field === "balance" ? "debtBal" : "debtMin"]);
+          // dataset keys from data-debt-name etc.
+        });
+      });
+    };
+    tbody.querySelectorAll("[data-debt-name]").forEach((inp) => {
+      inp.addEventListener("input", () => {
+        const i = Number(inp.dataset.debtName);
+        if (state.importDebts[i]) state.importDebts[i].name = inp.value;
+      });
+    });
+    tbody.querySelectorAll("[data-debt-apr]").forEach((inp) => {
+      inp.addEventListener("input", () => {
+        const i = Number(inp.dataset.debtApr);
+        if (state.importDebts[i]) state.importDebts[i].apr = inp.value;
+      });
+    });
+    tbody.querySelectorAll("[data-debt-bal]").forEach((inp) => {
+      inp.addEventListener("input", () => {
+        const i = Number(inp.dataset.debtBal);
+        if (state.importDebts[i]) state.importDebts[i].balance = inp.value;
+      });
+    });
+    tbody.querySelectorAll("[data-debt-min]").forEach((inp) => {
+      inp.addEventListener("input", () => {
+        const i = Number(inp.dataset.debtMin);
+        if (state.importDebts[i]) state.importDebts[i].min_payment = inp.value;
+      });
+    });
+  }
+
   function renderImportTable() {
     const tbody = $("#import-table tbody");
     const toolbar = $("#import-toolbar");
@@ -1461,6 +1578,7 @@
         if (state.importRows[i]) {
           state.importRows[i].selected = box.checked;
           renderImportTable();
+          rebuildImportDebtsFromSelection();
         }
       });
     });
@@ -1470,10 +1588,12 @@
         if (state.importRows[i]) {
           state.importRows[i].category = sel.value;
           if (sel.value === "Income") state.importRows[i].is_income = true;
+          rebuildImportDebtsFromSelection();
         }
       });
     });
     updateImportSelectedCount();
+    rebuildImportDebtsFromSelection();
   }
 
   function setImportSelection(mode) {
@@ -1488,6 +1608,7 @@
       else if (mode === "expenses") r.selected = !r.is_income;
     });
     renderImportTable();
+    rebuildImportDebtsFromSelection();
   }
 
   async function runImportPreview() {
@@ -1530,6 +1651,7 @@
       selected: r.selected !== false && !!r.date && r.amount > 0,
       raw: r.raw || "",
     }));
+    state.importDebts = [];
     if (msgEl) msgEl.textContent = data.message || "Preview ready — select rows and categories.";
     const badge = $("#import-bank-badge");
     if (badge) {
@@ -1550,6 +1672,23 @@
       msgEl.textContent = `Saving ${selected.length} selected row(s)…`;
       msgEl.style.color = "";
     }
+
+    // Capture debt fields from panel (APR etc.)
+    const debts = (state.importDebts || [])
+      .map((d) => {
+        const apr = parseFloat(d.apr);
+        const balance = parseFloat(d.balance);
+        const min_payment = parseFloat(d.min_payment);
+        return {
+          name: (d.name || "").trim(),
+          apr: Number.isFinite(apr) ? apr : 0,
+          balance: Number.isFinite(balance) ? balance : 0,
+          min_payment: Number.isFinite(min_payment) ? min_payment : 0,
+          update_existing: true,
+        };
+      })
+      .filter((d) => d.name && (d.apr > 0 || d.balance > 0 || d.min_payment > 0));
+
     const payload = {
       bank_label: state.importBankLabel || "Import",
       rows: selected.map((r) => ({
@@ -1560,6 +1699,7 @@
         category: r.category || "Other",
         item_type: r.category === "Income" || r.is_income ? "paycheck" : "actual",
       })),
+      debts,
     };
     const data = await api("/api/import/commit", {
       method: "POST",
@@ -1577,9 +1717,15 @@
         state.month = d.getMonth() + 1;
       }
     }
+    let extra = "";
+    if (data.debts_created || data.debts_updated) {
+      extra =
+        `\n\nDebt plan: ${data.debts_created || 0} card(s) added, ` +
+        `${data.debts_updated || 0} updated with APR/balance. Open Debt plan to run paydown.`;
+    }
     alert(
-      `${data.message || `Saved ${data.imported} item(s).`}\n\n` +
-        `Switching to Home for that month. Use month arrows if needed.`
+      `${data.message || `Saved ${data.imported} item(s).`}${extra}\n\n` +
+        `Switching to Home for that month.`
     );
     setView("dashboard");
     await refreshDashboard();

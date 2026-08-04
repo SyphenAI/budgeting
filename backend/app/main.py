@@ -68,7 +68,12 @@ from .schemas import (
 )
 from .bank_import import BANK_PRESETS, parse_bank_csv
 from .bank_pdf import parse_statement_pdf
-from .categorize import IMPORT_CATEGORIES, suggest_category
+from .categorize import (
+    IMPORT_CATEGORIES,
+    is_credit_card_category,
+    suggest_card_name,
+    suggest_category,
+)
 from .seed import seed_if_empty
 
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -1398,16 +1403,70 @@ def import_commit(
     if imported == 0:
         raise HTTPException(status_code=400, detail="No valid rows to import")
 
+    debts_created = 0
+    debts_updated = 0
+    for dlink in body.debts or []:
+        name = dlink.name.strip()[:120]
+        if not name:
+            continue
+        # Only create/update if user provided something useful for paydown
+        if dlink.apr <= 0 and dlink.balance <= 0 and dlink.min_payment <= 0:
+            continue
+
+        existing = (
+            db.query(Debt)
+            .filter(Debt.household_id == hh.id, Debt.name == name)
+            .first()
+        )
+        if existing and dlink.update_existing:
+            if dlink.apr > 0:
+                existing.apr = float(dlink.apr)
+            if dlink.balance > 0:
+                existing.balance = float(dlink.balance)
+            if dlink.min_payment > 0:
+                existing.min_payment = float(dlink.min_payment)
+            note = (existing.notes or "").strip()
+            tag = "APR from import"
+            if tag not in note:
+                existing.notes = (note + f" · {tag}").strip(" ·")
+            debts_updated += 1
+        elif not existing:
+            # Need at least a balance or min payment for a useful debt row;
+            # APR alone still creates a stub they can finish in Debt plan.
+            bal = float(dlink.balance) if dlink.balance > 0 else 0.01
+            db.add(
+                Debt(
+                    household_id=hh.id,
+                    name=name,
+                    balance=bal,
+                    apr=float(dlink.apr or 0),
+                    min_payment=float(dlink.min_payment or 0),
+                    notes="From statement import — set balance/min payment if needed for paydown.",
+                )
+            )
+            debts_created += 1
+
     db.commit()
     first_date = min(dates)
     last_date = max(dates)
+    extra = ""
+    if debts_created or debts_updated:
+        parts = []
+        if debts_created:
+            parts.append(f"{debts_created} card(s) added to Debt plan")
+        if debts_updated:
+            parts.append(f"{debts_updated} card(s) updated (APR/balance)")
+        extra = " " + "; ".join(parts) + "."
     return ImportCommitResponse(
         imported=imported,
         first_date=first_date,
         last_date=last_date,
+        debts_created=debts_created,
+        debts_updated=debts_updated,
         message=(
             f"Saved {imported} selected transaction(s) "
             f"({first_date.isoformat()} → {last_date.isoformat()})."
+            f"{extra}"
         ),
     )
 

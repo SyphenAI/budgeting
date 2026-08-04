@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Household Money</title>
   <link rel="icon" type="image/png" href="/brand/assets/logo_icon.png" />
-  <link rel="stylesheet" href="/brand/syphen-base.css?v=1.3.0" />
-  <link rel="stylesheet" href="/static/css/app.css?v=1.3.0" />
+  <link rel="stylesheet" href="/brand/syphen-base.css?v=1.3.1" />
+  <link rel="stylesheet" href="/static/css/app.css?v=1.3.1" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-  <script src="/static/js/app.js?v=1.3.0" defer></script>
+  <script src="/static/js/app.js?v=1.3.1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -773,6 +773,28 @@
               <button class="btn btn-ghost btn-sm" type="button" id="btn-import-income">Income only</button>
               <button class="btn btn-ghost btn-sm" type="button" id="btn-import-expenses">Expenses only</button>
               <span class="text-muted" style="font-size:0.8rem;margin-left:0.35rem" id="import-selected-count"></span>
+            </div>
+            <div id="import-debt-panel" class="card" style="display:none;margin-bottom:1rem;max-width:960px">
+              <h3 class="card-title">Credit cards → Debt plan
+                <button type="button" class="help-icon" data-help="When you import credit card payments, add each card’s interest rate (APR) here so Debt plan can calculate payoff. Balance and minimum payment are optional but improve the math. Leave APR at 0 to skip a card.">?</button>
+              </h3>
+              <p class="card-body" style="margin:0.5rem 0 0.75rem">
+                Detected from selected rows. Enter <strong class="text-primary">APR %</strong> from the card statement
+                (example 22.9). Optional balance/min payment feed the paydown calculator.
+              </p>
+              <div class="table-wrap">
+                <table class="data" id="import-debt-table">
+                  <thead>
+                    <tr>
+                      <th>Card name</th>
+                      <th class="num">APR %</th>
+                      <th class="num">Balance $ (optional)</th>
+                      <th class="num">Min pay $ (optional)</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
             </div>
             <div class="table-wrap import-table-wrap">
               <table class="data" id="import-table">
