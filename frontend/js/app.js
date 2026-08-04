@@ -770,35 +770,6 @@
 
   async function refreshInput() {
     await loadNames();
-    const q = `year=${state.year}&month=${state.month}`;
-    const items = await api(`/api/items?${q}`);
-    const tbody = $("#items-table tbody");
-    if (!items.length) {
-      tbody.innerHTML = `<tr><td colspan="5" class="text-muted">No items this month yet.</td></tr>`;
-      return;
-    }
-    tbody.innerHTML = items
-      .map((it) => {
-        const cls = it.is_income ? "positive" : "negative";
-        const sign = it.is_income ? "+" : "−";
-        return `<tr>
-          <td>${it.due_date}</td>
-          <td>${escapeHtml(it.name)}</td>
-          <td><span class="chip chip-${typeChip(it.item_type)}">${it.item_type}</span></td>
-          <td class="num ${cls}">${sign}${money(it.amount)}</td>
-          <td><button class="btn btn-ghost btn-sm" data-del="${it.id}" type="button">Delete</button></td>
-        </tr>`;
-      })
-      .join("");
-
-    tbody.querySelectorAll("[data-del]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        if (!confirm("Delete this item?")) return;
-        await api(`/api/items/${btn.dataset.del}`, { method: "DELETE" });
-        await refreshInput();
-        await refreshDashboard();
-      });
-    });
   }
 
   async function loadNames() {
@@ -1315,10 +1286,10 @@
         msg.textContent =
           itemType === "balance"
             ? "Bank balance saved — calendar act/est restart from that date."
-            : "Saved.";
+            : "Saved — it will show on the Home calendar.";
         $("#item-amount").value = "";
         $("#item-notes").value = "";
-        await refreshInput();
+        await loadNames();
         await refreshDashboard();
       } catch (ex) {
         msg.textContent = ex.message;
