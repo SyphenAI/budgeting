@@ -299,6 +299,35 @@ def list_items(
     return q.order_by(BudgetItem.due_date, BudgetItem.id).all()
 
 
+def _repeat_dates(start: date, frequency: str, months_ahead: int = 3) -> list[date]:
+    """
+    Build calendar dates for a recurring item.
+    monthly = same day-of-month; biweekly = every 14 days; weekly = every 7 days.
+    """
+    if frequency in (None, "", "once") or not start:
+        return [start]
+    end = start + timedelta(days=max(months_ahead, 1) * 31)
+    dates: list[date] = [start]
+    if frequency == "monthly":
+        y, m, day = start.year, start.month, start.day
+        for _ in range(months_ahead):
+            m += 1
+            if m > 12:
+                m = 1
+                y += 1
+            last = monthrange(y, m)[1]
+            dates.append(date(y, m, min(day, last)))
+        return dates
+    step = 14 if frequency == "biweekly" else 7 if frequency == "weekly" else 0
+    if step <= 0:
+        return [start]
+    cur = start + timedelta(days=step)
+    while cur <= end:
+        dates.append(cur)
+        cur += timedelta(days=step)
+    return dates
+
+
 @app.post("/api/items", response_model=BudgetItemOut)
 def create_item(
     body: BudgetItemCreate,
@@ -306,39 +335,53 @@ def create_item(
     db: Session = Depends(get_db),
 ):
     hh = get_household(db)
-    item = BudgetItem(
-        household_id=hh.id,
-        name=body.name.strip(),
-        item_type=body.item_type,
-        amount=float(body.amount),
-        is_income=body.is_income if body.item_type != "paycheck" else True,
-        due_date=body.due_date,
-        frequency=body.frequency,
-        notes=body.notes or "",
-        is_paid=body.is_paid,
-        category=body.category or "",
-    )
+    is_income = body.is_income if body.item_type != "paycheck" else True
+    name = body.name.strip()
     if body.item_type == "paycheck":
-        item.is_income = True
+        is_income = True
     if body.item_type == "balance":
         # Absolute bank balance snapshot — not income/expense
-        item.is_income = False
-        item.name = item.name or "Bank balance"
+        is_income = False
+        name = name or "Bank balance"
     if body.item_type in ("bill", "estimate", "actual") and body.is_income is False:
-        item.is_income = False
+        is_income = False
 
-    db.add(item)
+    # Bank balance is always a one-time snapshot
+    freq = "once" if body.item_type == "balance" else (body.frequency or "once")
+    schedule = (
+        [body.due_date]
+        if body.item_type == "balance" or freq == "once"
+        else _repeat_dates(body.due_date, freq, months_ahead=3)
+    )
 
-    if body.retain_name:
+    first: BudgetItem | None = None
+    for i, due in enumerate(schedule):
+        item = BudgetItem(
+            household_id=hh.id,
+            name=name,
+            item_type=body.item_type,
+            amount=float(body.amount),
+            is_income=is_income,
+            due_date=due,
+            frequency=freq,
+            notes=body.notes or "",
+            is_paid=bool(body.is_paid) if i == 0 else False,
+            category=body.category or "",
+        )
+        db.add(item)
+        if first is None:
+            first = item
+
+    if body.retain_name and name:
         exists = (
             db.query(ItemName)
-            .filter(ItemName.household_id == hh.id, ItemName.name == item.name)
+            .filter(ItemName.household_id == hh.id, ItemName.name == name)
             .first()
         )
         if not exists:
             kind = (
                 "income"
-                if item.is_income or body.item_type == "paycheck"
+                if is_income or body.item_type == "paycheck"
                 else (
                     "estimate"
                     if body.item_type == "estimate"
@@ -348,15 +391,16 @@ def create_item(
             db.add(
                 ItemName(
                     household_id=hh.id,
-                    name=item.name,
+                    name=name,
                     kind=kind,
                     is_default=False,
                 )
             )
 
     db.commit()
-    db.refresh(item)
-    return item
+    assert first is not None
+    db.refresh(first)
+    return first
 
 
 @app.patch("/api/items/{item_id}", response_model=BudgetItemOut)

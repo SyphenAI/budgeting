@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Household Money</title>
   <link rel="icon" type="image/png" href="/brand/assets/logo_icon.png" />
-  <link rel="stylesheet" href="/brand/syphen-base.css?v=1.4.0" />
-  <link rel="stylesheet" href="/static/css/app.css?v=1.4.0" />
+  <link rel="stylesheet" href="/brand/syphen-base.css?v=1.4.1" />
+  <link rel="stylesheet" href="/static/css/app.css?v=1.4.1" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-  <script src="/static/js/app.js?v=1.4.0" defer></script>
+  <script src="/static/js/app.js?v=1.4.1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -320,15 +320,15 @@
                   <input id="item-date" type="date" required />
                 </div>
                 <div class="form-group">
-                  <label for="item-freq">Frequency
-                    <button type="button" class="help-icon" data-help="How often this usually repeats. For now this is a label to help you — each month you can add the next occurrence as needed.">?</button>
+                  <label for="item-freq">Repeats
+                    <button type="button" class="help-icon" data-help="One time = only this date. Same day each month = puts it on that day for the next few months (rent, car payment). Every 2 weeks = like many paychecks — fills the calendar every 14 days from the date you pick.">?</button>
                   </label>
                   <select id="item-freq">
-                    <option value="once">One time</option>
-                    <option value="weekly">Weekly</option>
-                    <option value="biweekly">Every 2 weeks</option>
-                    <option value="monthly" selected>Monthly</option>
+                    <option value="once">One time only</option>
+                    <option value="monthly" selected>Same day each month</option>
+                    <option value="biweekly">Every 2 weeks (pay)</option>
                   </select>
+                  <div class="form-hint" id="item-freq-hint">Example: pick the 1st → rent shows on the 1st for the next few months.</div>
                 </div>
               </div>
               <div class="form-row">
@@ -997,12 +997,12 @@
                   </select>
                 </div>
                 <div class="form-group">
-                  <label for="edit-item-freq">Frequency</label>
+                  <label for="edit-item-freq">Repeats</label>
                   <select id="edit-item-freq">
-                    <option value="once">Once</option>
+                    <option value="once">One time only</option>
+                    <option value="monthly">Same day each month</option>
+                    <option value="biweekly">Every 2 weeks (pay)</option>
                     <option value="weekly">Weekly</option>
-                    <option value="biweekly">Biweekly</option>
-                    <option value="monthly">Monthly</option>
                   </select>
                 </div>
               </div>

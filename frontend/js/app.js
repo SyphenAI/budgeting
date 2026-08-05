@@ -2274,9 +2274,44 @@
 
     $("#item-name").addEventListener("change", toggleCustomName);
 
+    function updateItemFreqHint() {
+      const hint = $("#item-freq-hint");
+      const freqEl = $("#item-freq");
+      const typeEl = $("#item-type");
+      if (!hint || !freqEl) return;
+      const itemType = typeEl ? typeEl.value : "bill";
+      if (itemType === "balance") {
+        freqEl.value = "once";
+        freqEl.disabled = true;
+        hint.textContent = "Bank balance is always one time (the day you checked).";
+        return;
+      }
+      freqEl.disabled = false;
+      const f = freqEl.value;
+      if (f === "monthly") {
+        hint.textContent =
+          "Puts this on the same calendar day for the next few months (e.g. rent on the 1st).";
+      } else if (f === "biweekly") {
+        hint.textContent =
+          "Like many paychecks — fills the calendar every 14 days from the date you pick (~3 months).";
+      } else {
+        hint.textContent = "Only the date you pick — nothing repeats.";
+      }
+    }
     $("#item-type").addEventListener("change", () => {
-      // soft default: paycheck => income naming hint via type only
+      const t = $("#item-type").value;
+      const freq = $("#item-freq");
+      if (t === "paycheck" && freq && freq.value === "once") {
+        freq.value = "biweekly";
+      }
+      if ((t === "bill" || t === "estimate") && freq && freq.value === "once") {
+        freq.value = "monthly";
+      }
+      updateItemFreqHint();
     });
+    const itemFreq = $("#item-freq");
+    if (itemFreq) itemFreq.addEventListener("change", updateItemFreqHint);
+    updateItemFreqHint();
 
     $("#item-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -2293,6 +2328,7 @@
         if (itemType === "balance" && name === "__custom__") {
           name = $("#item-name-custom").value.trim() || "Bank balance";
         }
+        const freq = itemType === "balance" ? "once" : $("#item-freq").value;
         await api("/api/items", {
           method: "POST",
           json: {
@@ -2301,16 +2337,22 @@
             amount: parseFloat($("#item-amount").value),
             is_income: itemType === "paycheck",
             due_date: $("#item-date").value,
-            frequency: itemType === "balance" ? "once" : $("#item-freq").value,
+            frequency: freq,
             notes: $("#item-notes").value,
             category: itemType === "balance" ? "Balance" : $("#item-category").value,
             retain_name: $("#item-retain").checked,
           },
         });
-        msg.textContent =
-          itemType === "balance"
-            ? "Bank balance saved — calendar act/est restart from that date."
-            : "Saved.";
+        if (itemType === "balance") {
+          msg.textContent =
+            "Bank balance saved — calendar act/est restart from that date.";
+        } else if (freq === "monthly") {
+          msg.textContent = "Saved — same day added for the next few months on the calendar.";
+        } else if (freq === "biweekly") {
+          msg.textContent = "Saved — every-2-weeks dates added on the calendar (~3 months).";
+        } else {
+          msg.textContent = "Saved.";
+        }
         $("#item-amount").value = "";
         $("#item-notes").value = "";
         await refreshInput();
