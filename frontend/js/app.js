@@ -1527,7 +1527,29 @@
   // ── Debts ───────────────────────────────────────────────────
 
   async function refreshDebts() {
-    const debts = await api("/api/debts");
+    const [debts, hh] = await Promise.all([
+      api("/api/debts"),
+      api("/api/household").catch(() => state.household),
+    ]);
+    if (hh) state.household = hh;
+    const hint = $("#debt-profile-hint");
+    if (hint) {
+      const age = hh && hh.primary_age;
+      const st = hh && (hh.state || "").trim();
+      if (!age || !st) {
+        hint.style.display = "block";
+        hint.innerHTML =
+          `Add <strong>age</strong> and <strong>US state</strong> under Household. ` +
+          `Debt payoff and later benefits tips work better with that context ` +
+          `(stays on this PC — not tax advice). ` +
+          `<button type="button" class="btn btn-outline btn-sm" id="debt-go-profile" style="margin-left:0.5rem">Open Household</button>`;
+        const go = $("#debt-go-profile");
+        if (go) go.addEventListener("click", () => setView("settings"));
+      } else {
+        hint.style.display = "none";
+        hint.innerHTML = "";
+      }
+    }
     const tbody = $("#debts-table tbody");
     if (!debts.length) {
       tbody.innerHTML = `<tr><td colspan="5" class="text-muted">No debts listed — add cards or loans above to build a plan.</td></tr>`;
@@ -1573,8 +1595,18 @@
       const cmp = plan.compare || {};
       const av = cmp.avalanche || {};
       const sn = cmp.snowball || {};
+      const notes = (plan.planning_notes || [])
+        .map((n) => `<li>${escapeHtml(n)}</li>`)
+        .join("");
+      const notesBlock = notes
+        ? `<div class="card" style="margin-bottom:1rem;padding:1rem">
+            <h3 class="card-title" style="margin:0 0 0.5rem">Age &amp; state context</h3>
+            <ul class="planning-notes" style="margin:0;padding-left:1.15rem;color:var(--text-secondary);font-size:0.88rem;line-height:1.45">${notes}</ul>
+          </div>`
+        : "";
       box.innerHTML = `
         <div class="alert alert-brand" style="margin-bottom:1rem">${escapeHtml(plan.strategy_blurb)}</div>
+        ${notesBlock}
         <div class="plan-summary">
           <div class="stat"><div class="stat-label">Debt free</div><div class="stat-value" style="font-size:1.25rem;color:var(--brand-light)">${escapeHtml(plan.debt_free_label)}</div><div class="stat-hint">${plan.months} months</div></div>
           <div class="stat"><div class="stat-label">Total interest</div><div class="stat-value negative" style="font-size:1.25rem">${money(plan.total_interest)}</div></div>
@@ -1696,11 +1728,23 @@
       api("/api/household"),
       api("/api/members"),
     ]);
+    state.household = hh;
     $("#hh-name").value = hh.name;
     $("#hh-balance").value = hh.starting_balance;
     if ($("#hh-threshold")) {
       $("#hh-threshold").value =
         hh.safety_threshold != null ? hh.safety_threshold : 0;
+    }
+    if ($("#hh-primary-age")) {
+      $("#hh-primary-age").value =
+        hh.primary_age != null && hh.primary_age > 0 ? hh.primary_age : "";
+    }
+    if ($("#hh-partner-age")) {
+      $("#hh-partner-age").value =
+        hh.partner_age != null && hh.partner_age > 0 ? hh.partner_age : "";
+    }
+    if ($("#hh-state")) {
+      $("#hh-state").value = (hh.state || "").toUpperCase();
     }
     const list = $("#members-list");
     const meName = (state.user && (state.user.username || "")).toLowerCase();
@@ -2367,12 +2411,22 @@
       const msg = $("#settings-msg");
       try {
         const thrRaw = $("#hh-threshold") ? parseFloat($("#hh-threshold").value) : 0;
+        const ageRaw = $("#hh-primary-age")
+          ? parseInt($("#hh-primary-age").value, 10)
+          : 0;
+        const partnerRaw = $("#hh-partner-age")
+          ? parseInt($("#hh-partner-age").value, 10)
+          : 0;
         await api("/api/household", {
           method: "PATCH",
           json: {
             name: $("#hh-name").value.trim(),
             starting_balance: parseFloat($("#hh-balance").value),
             safety_threshold: Number.isFinite(thrRaw) ? Math.max(thrRaw, 0) : 0,
+            // 0 clears age
+            primary_age: Number.isFinite(ageRaw) ? ageRaw : 0,
+            partner_age: Number.isFinite(partnerRaw) ? partnerRaw : 0,
+            state: $("#hh-state") ? $("#hh-state").value : "",
           },
         });
         msg.textContent = "Saved.";

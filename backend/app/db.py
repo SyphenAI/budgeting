@@ -65,6 +65,21 @@ def migrate_sqlite() -> None:
                         "BOOLEAN NOT NULL DEFAULT 0"
                     )
                 )
+            if "primary_age" not in hcols:
+                conn.execute(
+                    text("ALTER TABLE households ADD COLUMN primary_age INTEGER")
+                )
+            if "partner_age" not in hcols:
+                conn.execute(
+                    text("ALTER TABLE households ADD COLUMN partner_age INTEGER")
+                )
+            if "state" not in hcols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE households ADD COLUMN state "
+                        "VARCHAR(2) NOT NULL DEFAULT ''"
+                    )
+                )
 
 
 def get_db():

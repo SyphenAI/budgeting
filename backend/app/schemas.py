@@ -35,6 +35,9 @@ class HouseholdOut(BaseModel):
     safety_threshold: float = 0.0
     onboarding_done: bool = False
     currency: str
+    primary_age: Optional[int] = None
+    partner_age: Optional[int] = None
+    state: str = ""
 
     class Config:
         from_attributes = True
@@ -45,6 +48,9 @@ class HouseholdUpdate(BaseModel):
     starting_balance: Optional[float] = None
     safety_threshold: Optional[float] = None
     onboarding_done: Optional[bool] = None
+    primary_age: Optional[int] = None
+    partner_age: Optional[int] = None
+    state: Optional[str] = None
 
 
 class ItemNameOut(BaseModel):
@@ -308,6 +314,8 @@ class DebtPlanSummary(BaseModel):
     steps: list[DebtPlanStep]
     # Compare both strategies at a glance
     compare: Optional[dict] = None
+    # Soft tips from age/state profile (not tax or legal advice)
+    planning_notes: list[str] = []
 
 
 # ── Investments (simple) ───────────────────────────────────────────

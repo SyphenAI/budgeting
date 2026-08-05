@@ -270,3 +270,141 @@ def compare_strategies(
             else "Both look similar on interest — pick the one she’ll stick with."
         ),
     }
+
+
+# States with no broad state income tax (simplified; not legal advice).
+# NH and TN have special cases historically; still commonly listed this way for planning hints.
+_NO_STATE_INCOME_TAX = frozenset(
+    {"AK", "FL", "NV", "NH", "SD", "TN", "TX", "WA", "WY"}
+)
+
+_STATE_NAMES = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "DC": "District of Columbia",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
+}
+
+
+def demographic_planning_notes(
+    primary_age: int | None = None,
+    partner_age: int | None = None,
+    state: str | None = None,
+    plan_months: int | None = None,
+) -> list[str]:
+    """
+    Soft, non-advice context for debt / benefits timing from age + state.
+    Always local/offline; never a substitute for a tax pro or benefits counselor.
+    """
+    notes: list[str] = []
+    st = (state or "").strip().upper()[:2]
+    ages = [a for a in (primary_age, partner_age) if a is not None and a > 0]
+    min_age = min(ages) if ages else None
+    max_age = max(ages) if ages else None
+
+    if not ages and not st:
+        notes.append(
+            "Add age and US state under Household settings. "
+            "That context can change how aggressive debt payoff feels next to taxes, "
+            "Medicare, Social Security timing, and state benefits — later tips will use it."
+        )
+        return notes
+
+    if st:
+        name = _STATE_NAMES.get(st, st)
+        if st in _NO_STATE_INCOME_TAX:
+            notes.append(
+                f"State profile: {name} ({st}) — often no broad state income tax. "
+                "Federal tax still applies; state rules can still affect property tax, "
+                "sales tax, and some benefits."
+            )
+        else:
+            notes.append(
+                f"State profile: {name} ({st}). State income tax and local rules can "
+                "affect take-home pay and which debt interest is worth prioritizing — "
+                "confirm with a tax pro before big moves."
+            )
+
+    if max_age is not None and max_age >= 62:
+        notes.append(
+            "Age 62+: Social Security claiming and Medicare (65) timing may matter soon. "
+            "Keeping a stronger cash cushion alongside debt payoff is often wise; "
+            "this app does not file for benefits."
+        )
+    elif max_age is not None and max_age >= 50:
+        notes.append(
+            "Age 50+: catch-up retirement contributions may be allowed (if you invest). "
+            "High-APR consumer debt still usually comes first, but age raises the value "
+            "of not raiding retirement to pay cards."
+        )
+    elif min_age is not None and min_age < 30:
+        notes.append(
+            "Under 30: long horizon favors killing high-interest debt early while "
+            "still building a small emergency fund — benefits eligibility can also "
+            "change with income and household size."
+        )
+    elif min_age is not None:
+        notes.append(
+            f"Ages on file: {', '.join(str(a) for a in ages)}. "
+            "Life stage affects risk tolerance (kids, job stability) more than the "
+            "avalanche math itself."
+        )
+
+    if plan_months and plan_months >= 60 and max_age and max_age >= 55:
+        notes.append(
+            f"This payoff plan is long (~{plan_months} months). Near mid/late career, "
+            "revisit whether high-APR debt is worth accelerating vs protecting cash "
+            "for health and income gaps — not a recommendation, just a checkpoint."
+        )
+
+    notes.append(
+        "Not tax, legal, or benefits advice. Numbers stay on this computer only."
+    )
+    return notes

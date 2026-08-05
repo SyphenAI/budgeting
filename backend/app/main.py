@@ -30,7 +30,12 @@ from .models import (
     User,
 )
 from .paystub import monthly_equivalent, next_pay_dates, parse_paystub_pdf
-from .planning import compare_strategies, goal_metrics, simulate_debt_paydown
+from .planning import (
+    compare_strategies,
+    demographic_planning_notes,
+    goal_metrics,
+    simulate_debt_paydown,
+)
 from .schemas import (
     BudgetItemCreate,
     BudgetItemOut,
@@ -241,6 +246,16 @@ def household_update(
         hh.safety_threshold = max(float(body.safety_threshold), 0.0)
     if body.onboarding_done is not None:
         hh.onboarding_done = bool(body.onboarding_done)
+    if body.primary_age is not None:
+        # 0 clears; otherwise clamp to a sensible adult/child range
+        age = int(body.primary_age)
+        hh.primary_age = None if age <= 0 else max(1, min(age, 120))
+    if body.partner_age is not None:
+        age = int(body.partner_age)
+        hh.partner_age = None if age <= 0 else max(1, min(age, 120))
+    if body.state is not None:
+        st = (body.state or "").strip().upper()[:2]
+        hh.state = st if st.isalpha() and len(st) == 2 else ""
     db.commit()
     db.refresh(hh)
     return hh
@@ -600,6 +615,15 @@ def onboarding_status(
             "done": has_housing,
             "hint": "Start with rent/housing or a regular bill.",
         },
+        {
+            "id": "profile",
+            "label": "Age & state (taxes / benefits context)",
+            "done": bool(
+                getattr(hh, "primary_age", None)
+                and (getattr(hh, "state", None) or "").strip()
+            ),
+            "hint": "Household settings — age and US state help later debt & benefits tips (not tax advice).",
+        },
     ]
     done_count = sum(1 for s in steps if s["done"])
     return {
@@ -609,6 +633,9 @@ def onboarding_status(
         "complete": done_count == len(steps),
         "done_count": done_count,
         "total": len(steps),
+        "primary_age": getattr(hh, "primary_age", None),
+        "partner_age": getattr(hh, "partner_age", None),
+        "state": getattr(hh, "state", "") or "",
     }
 
 
@@ -1071,6 +1098,12 @@ def debt_plan(
         payload, strategy=body.strategy, extra_monthly=body.extra_monthly
     )
     plan["compare"] = compare_strategies(payload, body.extra_monthly)
+    plan["planning_notes"] = demographic_planning_notes(
+        primary_age=getattr(hh, "primary_age", None),
+        partner_age=getattr(hh, "partner_age", None),
+        state=getattr(hh, "state", None),
+        plan_months=plan.get("months"),
+    )
     return DebtPlanSummary(**plan)
 
 
