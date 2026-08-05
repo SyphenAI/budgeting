@@ -30,6 +30,7 @@ class Household(Base):
     starting_balance: Mapped[float] = mapped_column(Float, default=0.0)
     # Warn on calendar when running balance is at/below this amount. 0 = disabled.
     safety_threshold: Mapped[float] = mapped_column(Float, default=0.0)
+    onboarding_done: Mapped[bool] = mapped_column(Boolean, default=False)
     currency: Mapped[str] = mapped_column(String(8), default="USD")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

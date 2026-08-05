@@ -8,9 +8,11 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+import shutil
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
@@ -237,6 +239,8 @@ def household_update(
     if body.safety_threshold is not None:
         # 0 disables warnings; never store negative
         hh.safety_threshold = max(float(body.safety_threshold), 0.0)
+    if body.onboarding_done is not None:
+        hh.onboarding_done = bool(body.onboarding_done)
     db.commit()
     db.refresh(hh)
     return hh
@@ -397,6 +401,225 @@ def delete_item(
     db.delete(item)
     db.commit()
     return {"ok": True}
+
+
+@app.post("/api/items/{item_id}/toggle-paid", response_model=BudgetItemOut)
+def toggle_paid(
+    item_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a bill/estimate paid or unpaid (affects actual running balance when paid)."""
+    hh = get_household(db)
+    item = (
+        db.query(BudgetItem)
+        .filter(BudgetItem.id == item_id, BudgetItem.household_id == hh.id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    item.is_paid = not bool(item.is_paid)
+    # Paid bills that were estimates can stay as bill; actual path counts paid bills
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+@app.post("/api/items/copy-month")
+def copy_month(
+    from_year: int = Query(...),
+    from_month: int = Query(...),
+    to_year: int = Query(...),
+    to_month: int = Query(...),
+    only_recurring: bool = Query(default=True),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Copy last month's bills/estimates/paychecks into another month.
+    only_recurring=True copies frequency weekly/biweekly/monthly (not once).
+    Skips exact duplicates already in the target month.
+    """
+    hh = get_household(db)
+    if not (1 <= from_month <= 12 and 1 <= to_month <= 12):
+        raise HTTPException(status_code=400, detail="Invalid month")
+
+    src_start = date(from_year, from_month, 1)
+    src_end = date(from_year, from_month, monthrange(from_year, from_month)[1])
+    tgt_start = date(to_year, to_month, 1)
+    tgt_last = monthrange(to_year, to_month)[1]
+
+    src_items = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.due_date >= src_start,
+            BudgetItem.due_date <= src_end,
+            BudgetItem.item_type.in_(("bill", "estimate", "paycheck")),
+        )
+        .all()
+    )
+    if only_recurring:
+        src_items = [i for i in src_items if i.frequency in ("weekly", "biweekly", "monthly")]
+
+    existing = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.due_date >= tgt_start,
+            BudgetItem.due_date <= date(to_year, to_month, tgt_last),
+        )
+        .all()
+    )
+    existing_keys = {
+        (i.name, i.item_type, float(i.amount), i.due_date.day) for i in existing
+    }
+
+    created = 0
+    for src in src_items:
+        day = min(src.due_date.day, tgt_last)
+        new_date = date(to_year, to_month, day)
+        key = (src.name, src.item_type, float(src.amount), day)
+        if key in existing_keys:
+            continue
+        db.add(
+            BudgetItem(
+                household_id=hh.id,
+                name=src.name,
+                item_type=src.item_type,
+                amount=float(src.amount),
+                is_income=bool(src.is_income),
+                due_date=new_date,
+                frequency=src.frequency,
+                notes=(src.notes or "") + " · copied from prior month",
+                is_paid=False,
+                category=src.category or "",
+            )
+        )
+        existing_keys.add(key)
+        created += 1
+    db.commit()
+    return {
+        "ok": True,
+        "created": created,
+        "message": f"Copied {created} recurring item(s) into {to_year}-{to_month:02d}.",
+    }
+
+
+@app.get("/api/onboarding")
+def onboarding_status(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    hh = get_household(db)
+    item_count = db.query(BudgetItem).filter(BudgetItem.household_id == hh.id).count()
+    has_income = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.is_income == True,  # noqa: E712
+        )
+        .first()
+        is not None
+    )
+    has_housing = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.is_income == False,  # noqa: E712
+        )
+        .first()
+        is not None
+    )
+    steps = [
+        {
+            "id": "rename",
+            "label": "Name your household",
+            "done": bool(hh.name and hh.name.strip() and hh.name != "My Household"),
+            "hint": "Tap Rename on Home (or Household settings).",
+        },
+        {
+            "id": "safety",
+            "label": "Set a safety amount",
+            "done": float(getattr(hh, "safety_threshold", 0) or 0) > 0,
+            "hint": "Household settings — warn when balance is low (example $300).",
+        },
+        {
+            "id": "income",
+            "label": "Add income (paycheck)",
+            "done": has_income,
+            "hint": "Money in/out, or import a statement / pay stub.",
+        },
+        {
+            "id": "bills",
+            "label": "Add at least one bill or expense",
+            "done": has_housing,
+            "hint": "Start with rent/housing or a regular bill.",
+        },
+    ]
+    done_count = sum(1 for s in steps if s["done"])
+    return {
+        "onboarding_done": bool(getattr(hh, "onboarding_done", False)),
+        "item_count": item_count,
+        "steps": steps,
+        "complete": done_count == len(steps),
+        "done_count": done_count,
+        "total": len(steps),
+    }
+
+
+@app.get("/api/backup")
+def backup_download(user: User = Depends(current_user)):
+    """Download the local SQLite database (budget data)."""
+    from .db import DB_PATH
+
+    if not DB_PATH.exists():
+        raise HTTPException(status_code=404, detail="No database file yet")
+    # Snapshot to avoid locked-file issues; delete temp after send
+    stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    tmp = DB_PATH.parent / f"budget-backup-{stamp}.db"
+    shutil.copy2(DB_PATH, tmp)
+
+    def _cleanup() -> None:
+        try:
+            if tmp.exists():
+                tmp.unlink()
+        except OSError:
+            pass
+
+    return FileResponse(
+        path=str(tmp),
+        filename=f"household-money-backup-{stamp}.db",
+        media_type="application/octet-stream",
+        background=BackgroundTask(_cleanup),
+    )
+
+
+@app.post("/api/restore")
+async def restore_backup(
+    file: UploadFile = File(...),
+    user: User = Depends(current_user),
+):
+    """Replace local database with an uploaded .db backup. Use carefully."""
+    from .db import DB_PATH, engine
+
+    raw = await file.read()
+    if len(raw) < 100 or raw[:15] != b"SQLite format 3":
+        # SQLite header is "SQLite format 3\000"
+        if not raw.startswith(b"SQLite format 3"):
+            raise HTTPException(status_code=400, detail="File does not look like a budget backup (.db)")
+
+    # Close pools and replace file
+    engine.dispose()
+    backup_old = DB_PATH.parent / f"budget-before-restore-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.db"
+    if DB_PATH.exists():
+        shutil.copy2(DB_PATH, backup_old)
+    DB_PATH.write_bytes(raw)
+    return {
+        "ok": True,
+        "message": "Backup restored. Sign out and sign in again (or restart the app).",
+        "prior_copy": str(backup_old.name) if backup_old.exists() else None,
+    }
 
 
 # ── Calendar + metrics + upcoming ────────────────────────────────
@@ -1275,19 +1498,42 @@ async def import_statement(
         kind = "PDF" if is_pdf else "CSV"
         raise HTTPException(status_code=400, detail=f"Could not parse {kind}: {ex}") from ex
 
-    rows = [
-        StatementRow(
-            date=r.date,
-            description=r.description,
-            amount=r.amount,
-            is_income=r.is_income,
-            raw=r.raw,
-            category=suggest_category(r.description, r.is_income),
-            selected=True,
+    hh_for_dup = get_household(db)
+    # Existing keys for duplicate detection (date + amount + name)
+    existing_items = db.query(BudgetItem).filter(BudgetItem.household_id == hh_for_dup.id).all()
+    existing_keys = {
+        (
+            i.due_date.isoformat() if i.due_date else "",
+            round(float(i.amount), 2),
+            (i.name or "").strip().lower()[:80],
         )
-        for r in parsed
-    ]
+        for i in existing_items
+    }
+
+    rows = []
+    for r in parsed:
+        cat = suggest_category(r.description, r.is_income)
+        key = (
+            r.date.isoformat() if r.date else "",
+            round(float(r.amount), 2),
+            (r.description or "").strip().lower()[:80],
+        )
+        is_dup = key in existing_keys and bool(r.date) and r.amount > 0
+        rows.append(
+            StatementRow(
+                date=r.date,
+                description=r.description,
+                amount=r.amount,
+                is_income=r.is_income,
+                raw=r.raw,
+                category=cat,
+                # Default: select non-duplicates
+                selected=not is_dup,
+                possible_duplicate=is_dup,
+            )
+        )
     skipped = sum(1 for r in rows if not r.date or r.amount <= 0)
+    dup_count = sum(1 for r in rows if r.possible_duplicate)
 
     first_date = None
     last_date = None
@@ -1341,6 +1587,11 @@ async def import_statement(
         )
     if skipped:
         suffix += f"; {skipped} row(s) missing date/amount cannot be saved"
+    if dup_count:
+        suffix += (
+            f"; {dup_count} possible duplicate(s) unchecked "
+            "(same date + amount + name already in your budget)"
+        )
     if not rows:
         suffix += " — no transactions found"
     return StatementParseResponse(

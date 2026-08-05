@@ -345,12 +345,13 @@
   async function refreshDashboard() {
     $("#month-label").textContent = monthName(state.year, state.month);
     const q = `year=${state.year}&month=${state.month}`;
-    const [cal, metrics, upcoming, hh, snap] = await Promise.all([
+    const [cal, metrics, upcoming, hh, snap, onboarding] = await Promise.all([
       api(`/api/calendar?${q}`),
       api(`/api/metrics?${q}`),
       api("/api/upcoming"),
       api("/api/household"),
       api("/api/snapshot"),
+      api("/api/onboarding").catch(() => null),
     ]);
     state.calendar = cal;
     state.metrics = metrics;
@@ -364,12 +365,145 @@
         ? `Shared by ${who} · local only`
         : "Cash · plan · goals · debt · investments — all local";
     }
+    renderOnboarding(onboarding, hh);
+    renderEmptyCoach(onboarding, cal, metrics);
     renderSnapshot(snap);
     renderStats(metrics, cal);
     renderThresholdBanner(cal);
     renderCalendar(cal);
     renderCharts(metrics);
     renderUpcoming(upcoming.items || []);
+    if (state.selectedDate) {
+      // Keep day panel in sync after paid/edit/delete (no toggle)
+      openDayExpand(state.selectedDate, false);
+    }
+  }
+
+  function renderOnboarding(ob, hh) {
+    const panel = $("#onboarding-panel");
+    if (!panel) return;
+    if (!ob || ob.onboarding_done || (hh && hh.onboarding_done)) {
+      panel.style.display = "none";
+      panel.innerHTML = "";
+      return;
+    }
+    // Show until complete OR user dismisses
+    const steps = ob.steps || [];
+    const done = ob.done_count || 0;
+    const total = ob.total || steps.length || 1;
+    const pct = Math.round((done / total) * 100);
+    panel.style.display = "block";
+    panel.innerHTML = `
+      <div class="onboarding-inner">
+        <div class="onboarding-head">
+          <div>
+            <div class="section-label" style="margin:0">Getting started</div>
+            <h2 style="margin:0.25rem 0 0;font-size:1.1rem">Set up your household budget</h2>
+            <p class="text-muted" style="margin:0.35rem 0 0;font-size:0.85rem">
+              ${done} of ${total} steps done · local only on this computer
+            </p>
+          </div>
+          <div class="onboarding-actions">
+            <button type="button" class="btn btn-ghost btn-sm" id="onboarding-dismiss">Hide checklist</button>
+          </div>
+        </div>
+        <div class="onboarding-progress"><div class="onboarding-progress-bar" style="width:${pct}%"></div></div>
+        <ul class="onboarding-steps">
+          ${steps
+            .map(
+              (s) => `<li class="${s.done ? "done" : ""}">
+                <span class="ob-check">${s.done ? "✓" : "○"}</span>
+                <div>
+                  <strong>${escapeHtml(s.label)}</strong>
+                  <div class="text-muted" style="font-size:0.8rem">${escapeHtml(s.hint || "")}</div>
+                </div>
+              </li>`
+            )
+            .join("")}
+        </ul>
+        ${
+          ob.complete
+            ? `<button type="button" class="btn btn-primary btn-sm" id="onboarding-finish">All done — hide this</button>`
+            : `<div class="onboarding-quick">
+                <button type="button" class="btn btn-outline btn-sm" data-go-view="input">Add bill or pay</button>
+                <button type="button" class="btn btn-outline btn-sm" data-go-view="import">Import statement</button>
+                <button type="button" class="btn btn-outline btn-sm" data-go-view="settings">Household settings</button>
+              </div>`
+        }
+      </div>`;
+
+    const dismiss = () => dismissOnboarding();
+    const dBtn = $("#onboarding-dismiss");
+    const fBtn = $("#onboarding-finish");
+    if (dBtn) dBtn.addEventListener("click", dismiss);
+    if (fBtn) fBtn.addEventListener("click", dismiss);
+    panel.querySelectorAll("[data-go-view]").forEach((btn) => {
+      btn.addEventListener("click", () => setView(btn.dataset.goView));
+    });
+  }
+
+  async function dismissOnboarding() {
+    try {
+      await api("/api/household", {
+        method: "PATCH",
+        json: { onboarding_done: true },
+      });
+      if (state.household) state.household.onboarding_done = true;
+      const panel = $("#onboarding-panel");
+      if (panel) {
+        panel.style.display = "none";
+        panel.innerHTML = "";
+      }
+    } catch (ex) {
+      alert(ex.message || "Could not save");
+    }
+  }
+
+  function renderEmptyCoach(ob, cal, metrics) {
+    const el = $("#empty-coach");
+    if (!el) return;
+    const itemCount = ob ? ob.item_count : 0;
+    const hasMonthItems = (cal?.days || []).some((d) => (d.items || []).length);
+    // Show coaching when brand new or this month is empty
+    if (itemCount > 0 && hasMonthItems) {
+      el.style.display = "none";
+      el.innerHTML = "";
+      return;
+    }
+    const brandNew = itemCount === 0;
+    el.style.display = "grid";
+    el.innerHTML = `
+      <div class="coach-card">
+        <h3>${brandNew ? "Welcome — start simple" : "This month looks empty"}</h3>
+        <p>${
+          brandNew
+            ? "No bank login needed. Add a few bills and a paycheck, or import a statement. Everything stays on this PC."
+            : "Use Copy last month for recurring bills, add items on Input, or import a bank statement for actual spending."
+        }</p>
+        <div class="coach-actions">
+          <button type="button" class="btn btn-primary btn-sm" data-go-view="input">Add money in/out</button>
+          <button type="button" class="btn btn-outline btn-sm" data-go-view="import">Import statement</button>
+          ${
+            !brandNew
+              ? `<button type="button" class="btn btn-outline btn-sm" id="coach-copy-month">Copy last month</button>`
+              : ""
+          }
+        </div>
+      </div>
+      <div class="coach-card coach-tips">
+        <h3>Quick tips</h3>
+        <ul>
+          <li><strong>Green act</strong> = money you know about (pay, actuals, paid bills).</li>
+          <li><strong>Orange est</strong> = full plan including unpaid bills and estimates.</li>
+          <li>Log a <strong>bank balance</strong> on any day to reset totals to real life.</li>
+          <li>Set a <strong>safety amount</strong> under Household so low days stand out.</li>
+        </ul>
+      </div>`;
+    el.querySelectorAll("[data-go-view]").forEach((btn) => {
+      btn.addEventListener("click", () => setView(btn.dataset.goView));
+    });
+    const copyBtn = $("#coach-copy-month");
+    if (copyBtn) copyBtn.addEventListener("click", () => copyLastMonth());
   }
 
   function buildPrintReport() {
@@ -803,7 +937,12 @@
 
     const day = state.calendar.days.find((d) => d.date === dateStr);
     const panel = $("#day-expand");
-    if (!day || !panel) return;
+    if (!panel) return;
+    if (!day) {
+      // Selected day not in this month (e.g. after month change)
+      closeDayExpand();
+      return;
+    }
 
     const label = new Date(dateStr + "T12:00:00").toLocaleDateString(undefined, {
       weekday: "long",
@@ -853,9 +992,7 @@
 
     const tbody = $("#day-expand-table tbody");
     if (!day.items.length) {
-      tbody.innerHTML = "";
-      // show empty row via message in table
-      tbody.innerHTML = `<tr><td colspan="4" class="day-expand-empty">Nothing scheduled — add bills, estimates, pay, or a bank balance on Input.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="day-expand-empty">Nothing scheduled — add bills, estimates, pay, or a bank balance on Input.</td></tr>`;
     } else {
       tbody.innerHTML = day.items
         .map((it) => {
@@ -867,17 +1004,67 @@
             const sign = it.is_income ? "+" : "−";
             amountCell = `<td class="num ${cls}">${sign}${money(it.amount)}</td>`;
           }
-          return `<tr>
-            <td>${escapeHtml(it.name)}</td>
+          const paidChip =
+            it.item_type === "bill" && it.is_paid
+              ? `<span class="chip chip-success" style="margin-left:0.35rem">paid</span>`
+              : "";
+          const paidBtn =
+            it.item_type === "bill"
+              ? `<button type="button" class="btn btn-ghost btn-sm" data-toggle-paid="${it.id}" title="Mark paid or unpaid">${it.is_paid ? "Unpaid" : "Paid"}</button>`
+              : "";
+          return `<tr class="${it.is_paid && it.item_type === "bill" ? "row-paid" : ""}">
+            <td>${escapeHtml(it.name)}${paidChip}</td>
             <td><span class="chip chip-${typeChip(it.item_type)}">${it.item_type}</span></td>
             ${amountCell}
             <td class="text-muted">${escapeHtml(it.notes || "")}</td>
+            <td class="day-actions">
+              ${paidBtn}
+              <button type="button" class="btn btn-ghost btn-sm" data-edit-item="${it.id}">Edit</button>
+              <button type="button" class="btn btn-ghost btn-sm text-danger" data-del-item="${it.id}">Delete</button>
+            </td>
           </tr>`;
         })
         .join("");
+
+      tbody.querySelectorAll("[data-toggle-paid]").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            await api(`/api/items/${btn.dataset.togglePaid}/toggle-paid`, {
+              method: "POST",
+            });
+            await refreshDashboard();
+          } catch (ex) {
+            alert(ex.message || "Could not update paid status");
+          }
+        });
+      });
+      tbody.querySelectorAll("[data-edit-item]").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const id = Number(btn.dataset.editItem);
+          const item = day.items.find((x) => x.id === id);
+          if (item) openEditItemModal(item);
+        });
+      });
+      tbody.querySelectorAll("[data-del-item]").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          if (!confirm("Delete this item?")) return;
+          try {
+            await api(`/api/items/${btn.dataset.delItem}`, { method: "DELETE" });
+            await refreshDashboard();
+            await refreshInput().catch(() => {});
+          } catch (ex) {
+            alert(ex.message || "Could not delete");
+          }
+        });
+      });
     }
     panel.classList.add("open");
-    panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (toggle) {
+      panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
   }
 
   function closeDayExpand() {
@@ -885,6 +1072,132 @@
     const panel = $("#day-expand");
     if (panel) panel.classList.remove("open");
     $$(".cal-cell[data-date]").forEach((c) => c.classList.remove("selected"));
+  }
+
+  function openEditItemModal(item) {
+    const modal = $("#edit-item-modal");
+    if (!modal || !item) return;
+    $("#edit-item-id").value = item.id;
+    $("#edit-item-name").value = item.name || "";
+    $("#edit-item-amount").value = item.amount;
+    $("#edit-item-date").value = item.due_date;
+    $("#edit-item-type").value = item.item_type || "bill";
+    $("#edit-item-freq").value = item.frequency || "once";
+    $("#edit-item-notes").value = item.notes || "";
+    $("#edit-item-category").value = item.category || "";
+    const paid = $("#edit-item-paid");
+    if (paid) paid.checked = !!item.is_paid;
+    const paidRow = $("#edit-item-paid-row");
+    if (paidRow) {
+      paidRow.style.display =
+        item.item_type === "bill" || item.item_type === "estimate" ? "" : "none";
+    }
+    const msg = $("#edit-item-msg");
+    if (msg) msg.textContent = "";
+    modal.hidden = false;
+  }
+
+  function closeEditItemModal() {
+    const modal = $("#edit-item-modal");
+    if (modal) modal.hidden = true;
+  }
+
+  async function copyLastMonth() {
+    let fromYear = state.year;
+    let fromMonth = state.month - 1;
+    if (fromMonth < 1) {
+      fromMonth = 12;
+      fromYear -= 1;
+    }
+    if (
+      !confirm(
+        `Copy recurring bills/estimates/paychecks from ${monthName(fromYear, fromMonth)} into ${monthName(state.year, state.month)}?\n\nOne-time items are skipped. Existing matches are not duplicated.`
+      )
+    ) {
+      return;
+    }
+    try {
+      const qs = new URLSearchParams({
+        from_year: String(fromYear),
+        from_month: String(fromMonth),
+        to_year: String(state.year),
+        to_month: String(state.month),
+        only_recurring: "true",
+      });
+      const data = await api(`/api/items/copy-month?${qs}`, { method: "POST" });
+      alert(data.message || `Copied ${data.created || 0} item(s).`);
+      await refreshDashboard();
+      await refreshInput().catch(() => {});
+    } catch (ex) {
+      alert(ex.message || "Copy failed");
+    }
+  }
+
+  async function downloadBackup() {
+    const msg = $("#backup-msg");
+    try {
+      if (msg) msg.textContent = "Preparing backup…";
+      const res = await fetch("/api/backup", {
+        headers: { Authorization: `Bearer ${state.token}` },
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.detail || "Backup failed");
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get("content-disposition") || "";
+      const match = cd.match(/filename="?([^"]+)"?/i);
+      const fname =
+        match?.[1] ||
+        `household-money-backup-${new Date().toISOString().slice(0, 10)}.db`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fname;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      if (msg) msg.textContent = "Backup downloaded. Keep the file somewhere safe.";
+    } catch (ex) {
+      if (msg) msg.textContent = ex.message || "Backup failed";
+      alert(ex.message || "Backup failed");
+    }
+  }
+
+  async function restoreBackup(file) {
+    const msg = $("#backup-msg");
+    if (!file) return;
+    if (
+      !confirm(
+        "Restore will REPLACE all current budget data with this backup file.\n\nA copy of the current database is saved in the data folder first.\n\nContinue?"
+      )
+    ) {
+      return;
+    }
+    try {
+      if (msg) msg.textContent = "Restoring…";
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/restore", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${state.token}` },
+        body: fd,
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.detail || "Restore failed");
+      }
+      const data = await res.json();
+      alert(
+        (data.message || "Restored.") +
+          "\n\nYou will be signed out — sign in again with the passwords from the backup."
+      );
+      logout(false);
+    } catch (ex) {
+      if (msg) msg.textContent = ex.message || "Restore failed";
+      alert(ex.message || "Restore failed");
+    }
   }
 
   function renderCharts(m) {
@@ -983,21 +1296,42 @@
   function renderUpcoming(items) {
     const tbody = $("#upcoming-table tbody");
     if (!items.length) {
-      tbody.innerHTML = `<tr><td colspan="4" class="text-muted">Nothing upcoming — add bills or pay on Input.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="text-muted">Nothing upcoming — add bills or pay on Input, or Copy last month.</td></tr>`;
       return;
     }
     tbody.innerHTML = items
       .map((it) => {
         const cls = it.is_income ? "positive" : "negative";
         const sign = it.is_income ? "+" : "−";
+        const paid =
+          it.item_type === "bill" && it.is_paid
+            ? ` <span class="chip chip-success">paid</span>`
+            : "";
+        const paidBtn =
+          it.item_type === "bill"
+            ? `<button type="button" class="btn btn-ghost btn-sm" data-up-paid="${it.id}">${it.is_paid ? "Undo" : "Paid"}</button>`
+            : "";
         return `<tr>
           <td>${it.due_date}</td>
-          <td>${escapeHtml(it.name)}</td>
+          <td>${escapeHtml(it.name)}${paid}</td>
           <td><span class="chip chip-${typeChip(it.item_type)}">${it.item_type}</span></td>
           <td class="num ${cls}">${sign}${money(it.amount)}</td>
+          <td>${paidBtn}</td>
         </tr>`;
       })
       .join("");
+    tbody.querySelectorAll("[data-up-paid]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await api(`/api/items/${btn.dataset.upPaid}/toggle-paid`, {
+            method: "POST",
+          });
+          await refreshDashboard();
+        } catch (ex) {
+          alert(ex.message || "Could not update");
+        }
+      });
+    });
   }
 
   function typeChip(t) {
@@ -1017,19 +1351,31 @@
     const tbody = $("#items-table tbody");
     if (!tbody) return;
     if (!items.length) {
-      tbody.innerHTML = `<tr><td colspan="5" class="text-muted">No items this month yet — add one above.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="text-muted">No items this month yet — add one above, use Copy last month on Home, or import a statement.</td></tr>`;
       return;
     }
     tbody.innerHTML = items
       .map((it) => {
         const cls = it.is_income ? "positive" : "negative";
         const sign = it.is_income ? "+" : "−";
+        const paid =
+          it.item_type === "bill" && it.is_paid
+            ? ` <span class="chip chip-success">paid</span>`
+            : "";
+        const paidBtn =
+          it.item_type === "bill"
+            ? `<button class="btn btn-ghost btn-sm" data-toggle-paid="${it.id}" type="button">${it.is_paid ? "Unpaid" : "Paid"}</button>`
+            : "";
         return `<tr>
           <td>${it.due_date}</td>
-          <td>${escapeHtml(it.name)}</td>
+          <td>${escapeHtml(it.name)}${paid}</td>
           <td><span class="chip chip-${typeChip(it.item_type)}">${it.item_type}</span></td>
           <td class="num ${cls}">${sign}${money(it.amount)}</td>
-          <td><button class="btn btn-ghost btn-sm" data-del="${it.id}" type="button">Delete</button></td>
+          <td class="day-actions">
+            ${paidBtn}
+            <button class="btn btn-ghost btn-sm" data-edit="${it.id}" type="button">Edit</button>
+            <button class="btn btn-ghost btn-sm" data-del="${it.id}" type="button">Delete</button>
+          </td>
         </tr>`;
       })
       .join("");
@@ -1040,6 +1386,26 @@
         await api(`/api/items/${btn.dataset.del}`, { method: "DELETE" });
         await refreshInput();
         await refreshDashboard();
+      });
+    });
+    tbody.querySelectorAll("[data-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = Number(btn.dataset.edit);
+        const item = items.find((x) => x.id === id);
+        if (item) openEditItemModal(item);
+      });
+    });
+    tbody.querySelectorAll("[data-toggle-paid]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await api(`/api/items/${btn.dataset.togglePaid}/toggle-paid`, {
+            method: "POST",
+          });
+          await refreshInput();
+          await refreshDashboard();
+        } catch (ex) {
+          alert(ex.message || "Could not update");
+        }
       });
     });
   }
@@ -1419,7 +1785,14 @@
     if (!el) return;
     const n = state.importRows.filter((r) => r.selected && r.date && r.amount > 0).length;
     const total = state.importRows.length;
-    el.textContent = total ? `${n} of ${total} selected` : "";
+    const dups = state.importRows.filter((r) => r.possible_duplicate).length;
+    if (!total) {
+      el.textContent = "";
+      return;
+    }
+    el.textContent = dups
+      ? `${n} of ${total} selected · ${dups} possible duplicate(s)`
+      : `${n} of ${total} selected`;
   }
 
   function isCreditCardRow(r) {
@@ -1544,7 +1917,7 @@
     if (!tbody) return;
     if (!state.importRows.length) {
       if (toolbar) toolbar.style.display = "none";
-      tbody.innerHTML = `<tr><td colspan="6" class="text-muted">Preview a statement to choose what to import.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="text-muted">Preview a statement to choose what to import.</td></tr>`;
       updateImportSelectedCount();
       return;
     }
@@ -1554,7 +1927,13 @@
         const cls = r.is_income ? "positive" : "negative";
         const missing = !r.date || !(r.amount > 0);
         const off = !r.selected || missing ? "import-off" : "";
-        return `<tr class="${off}" data-import-idx="${i}">
+        const dup = r.possible_duplicate ? "import-dup" : "";
+        const note = r.possible_duplicate
+          ? `<span class="chip chip-warning" title="Same date, amount, and similar name already in your budget">Possible duplicate</span>`
+          : missing
+            ? `<span class="text-muted">Skipped</span>`
+            : "";
+        return `<tr class="${off} ${dup}" data-import-idx="${i}">
           <td>
             <input class="import-check" type="checkbox" data-import-check="${i}"
               ${r.selected && !missing ? "checked" : ""} ${missing ? "disabled" : ""} />
@@ -1568,6 +1947,7 @@
               ${importCategoryOptions(r.category || (r.is_income ? "Income" : "Other"))}
             </select>
           </td>
+          <td>${note}</td>
         </tr>`;
       })
       .join("");
@@ -1606,6 +1986,9 @@
       else if (mode === "none") r.selected = false;
       else if (mode === "income") r.selected = !!r.is_income;
       else if (mode === "expenses") r.selected = !r.is_income;
+      else if (mode === "skip-dups") {
+        if (r.possible_duplicate) r.selected = false;
+      }
     });
     renderImportTable();
     rebuildImportDebtsFromSelection();
@@ -1648,7 +2031,9 @@
       amount: r.amount,
       is_income: !!r.is_income,
       category: r.category || (r.is_income ? "Income" : "Other"),
-      selected: r.selected !== false && !!r.date && r.amount > 0,
+      // Backend unchecks possible duplicates; respect that
+      selected: r.selected === true && !!r.date && r.amount > 0,
+      possible_duplicate: !!r.possible_duplicate,
       raw: r.raw || "",
     }));
     state.importDebts = [];
@@ -1830,6 +2215,62 @@
     if (printBtn) {
       printBtn.addEventListener("click", () => printMonthOverview());
     }
+    const copyMonthBtn = $("#btn-copy-month");
+    if (copyMonthBtn) {
+      copyMonthBtn.addEventListener("click", () => copyLastMonth());
+    }
+
+    const editForm = $("#edit-item-form");
+    if (editForm) {
+      editForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = $("#edit-item-msg");
+        const id = $("#edit-item-id").value;
+        try {
+          const itemType = $("#edit-item-type").value;
+          await api(`/api/items/${id}`, {
+            method: "PATCH",
+            json: {
+              name: $("#edit-item-name").value.trim(),
+              amount: parseFloat($("#edit-item-amount").value),
+              due_date: $("#edit-item-date").value,
+              item_type: itemType,
+              frequency: itemType === "balance" ? "once" : $("#edit-item-freq").value,
+              notes: $("#edit-item-notes").value,
+              category: $("#edit-item-category").value,
+              is_income: itemType === "paycheck",
+              is_paid: !!$("#edit-item-paid")?.checked,
+            },
+          });
+          if (msg) msg.textContent = "Saved.";
+          closeEditItemModal();
+          await refreshDashboard();
+          await refreshInput().catch(() => {});
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message;
+          else alert(ex.message);
+        }
+      });
+    }
+    const editCancel = $("#edit-item-cancel");
+    if (editCancel) editCancel.addEventListener("click", () => closeEditItemModal());
+    const editModal = $("#edit-item-modal");
+    if (editModal) {
+      editModal.addEventListener("click", (e) => {
+        if (e.target === editModal) closeEditItemModal();
+      });
+    }
+
+    const backupBtn = $("#btn-backup");
+    if (backupBtn) backupBtn.addEventListener("click", () => downloadBackup());
+    const restoreFile = $("#restore-file");
+    if (restoreFile) {
+      restoreFile.addEventListener("change", async () => {
+        const f = restoreFile.files?.[0];
+        if (f) await restoreBackup(f);
+        restoreFile.value = "";
+      });
+    }
 
     $("#item-name").addEventListener("change", toggleCustomName);
 
@@ -1922,6 +2363,8 @@
     if (impNone) impNone.addEventListener("click", () => setImportSelection("none"));
     if (impInc) impInc.addEventListener("click", () => setImportSelection("income"));
     if (impExp) impExp.addEventListener("click", () => setImportSelection("expenses"));
+    const impSkip = $("#btn-import-skip-dups");
+    if (impSkip) impSkip.addEventListener("click", () => setImportSelection("skip-dups"));
 
     const closeBtn = $("#day-expand-close");
     if (closeBtn) closeBtn.addEventListener("click", () => closeDayExpand());

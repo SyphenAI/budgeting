@@ -33,6 +33,7 @@ class HouseholdOut(BaseModel):
     name: str
     starting_balance: float
     safety_threshold: float = 0.0
+    onboarding_done: bool = False
     currency: str
 
     class Config:
@@ -43,6 +44,7 @@ class HouseholdUpdate(BaseModel):
     name: Optional[str] = None
     starting_balance: Optional[float] = None
     safety_threshold: Optional[float] = None
+    onboarding_done: Optional[bool] = None
 
 
 class ItemNameOut(BaseModel):
@@ -156,6 +158,7 @@ class StatementRow(BaseModel):
     raw: str = ""
     category: str = "Other"
     selected: bool = True
+    possible_duplicate: bool = False
 
 
 class StatementParseResponse(BaseModel):

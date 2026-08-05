@@ -58,6 +58,13 @@ def migrate_sqlite() -> None:
                         "FLOAT NOT NULL DEFAULT 0"
                     )
                 )
+            if "onboarding_done" not in hcols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE households ADD COLUMN onboarding_done "
+                        "BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                )
 
 
 def get_db():
