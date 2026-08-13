@@ -22,10 +22,11 @@ echo  Folder: %cd%
 echo  Do not close this window while using the app.
 echo  When finished, close this window to stop the app.
 echo.
-echo  Starting on http://127.0.0.1:8787 ...
+echo  Starting on http://0.0.0.0:50100 ...
+echo  This computer: http://127.0.0.1:50100
 echo.
 
-"%PY%" -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8787
+"%PY%" -m uvicorn backend.app.main:app --host 0.0.0.0 --port 50100
 
 echo.
 echo  Server stopped.

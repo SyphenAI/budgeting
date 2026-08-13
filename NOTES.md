@@ -5,7 +5,8 @@ Design notes for the Household Money app. No personal or household-specific data
 ## Audience
 
 - Non-technical household users
-- Local install (Windows + Docker optional)
+- Local install (Windows + Docker Desktop)
+- Listens on port **50100**, bound to `0.0.0.0` so other devices on the home `192.` LAN can open it
 - Optional second adult login (partner)
 - Simple gate so kids cannot open the app easily
 

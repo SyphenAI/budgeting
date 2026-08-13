@@ -1,0 +1,16 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+data
+github_pat.txt
+*.pat
+.env
+.env.*
+*.pdf
+*.log
+tmp
+temp
+samples
+*.md

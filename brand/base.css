@@ -1,9 +1,8 @@
 /* ================================================================
-   SYPHEN.AI — Base UI (app shell)
-   Matches marketing site patterns; tuned for product UI.
+   Household Money — base UI (app shell)
    ================================================================ */
 
-@import url("./syphen-tokens.css");
+@import url("./tokens.css");
 
 /* Reset & base */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

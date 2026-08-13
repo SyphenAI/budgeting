@@ -31,9 +31,9 @@ if not exist "%~dp0backend\app\main.py" (
   exit /b 1
 )
 
-REM Free port 8787 if a leftover process is stuck
-for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr ":8787" ^| findstr "LISTENING"') do (
-  echo  Clearing old app still using port 8787...
+REM Free port 50100 if a leftover process is stuck
+for /f "tokens=5" %%P in ('netstat -ano 2^>nul ^| findstr ":50100" ^| findstr "LISTENING"') do (
+  echo  Clearing old app still using port 50100...
   taskkill /PID %%P /F >nul 2>&1
 )
 
@@ -50,7 +50,7 @@ set /a tries=0
 set /a tries+=1
 if %tries% GTR 60 goto notready
 
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:8787/' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -ge 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -Uri 'http://127.0.0.1:50100/' -UseBasicParsing -TimeoutSec 2; if ($r.StatusCode -ge 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if %errorlevel%==0 goto ready
 
 timeout /t 1 /nobreak >nul
@@ -68,20 +68,20 @@ echo    1. Close all Household Money windows
 echo    2. Double-click install.bat
 echo    3. Double-click start.bat
 echo.
-start "" "http://127.0.0.1:8787"
+start "" "http://127.0.0.1:50100"
 pause
 exit /b 1
 
 :ready
 echo  App is ready. Opening your browser...
 echo.
-start "" "http://127.0.0.1:8787"
+start "" "http://127.0.0.1:50100"
 
 echo  ============================================
 echo   Household Money is running
 echo  ============================================
 echo.
-echo  Address:  http://127.0.0.1:8787
+echo  Address:  http://127.0.0.1:50100
 echo.
 echo  First login (until you change it):
 echo    Username: admin

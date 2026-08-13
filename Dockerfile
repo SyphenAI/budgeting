@@ -12,9 +12,10 @@ RUN pip install --no-cache-dir -r /app/backend/requirements.txt
 COPY backend /app/backend
 COPY frontend /app/frontend
 COPY brand /app/brand
+COPY VERSION /app/VERSION
 
 RUN mkdir -p /app/data
 
-EXPOSE 8787
+EXPOSE 50100
 
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8787"]
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "50100"]

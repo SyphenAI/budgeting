@@ -1,130 +1,52 @@
 # Household Money
 
-A simple budget app for your household.
+A simple budget app that runs on your own computer.
 
-- Runs **on your Windows computer** (not on a website in the cloud)
-- Keeps your money information **private on your PC**
-- Helps with bills, paychecks, goals, debt plans, and simple savings/investments
+- Bills, paychecks, goals, debt plans, and simple savings
+- Your data stays in a local `data` folder (not in the cloud)
+- No coding required
 
-You do **not** need to know how to code.
-
----
-
-## Important: Windows Defender / “blocked” messages
-
-On many Windows PCs, **Windows Defender** (or SmartScreen) will warn you about `.bat` files or Python. That is common for apps that are not from the Microsoft Store.
-
-### If Windows blocks the app
-
-Try these in order:
-
-1. **Run as administrator (often required)**  
-   - Right-click **`install.bat`** → **Run as administrator**  
-   - Later, right-click **`start.bat`** → **Run as administrator**  
-   - If Windows asks “Do you want to allow this app to make changes?”, click **Yes**
-
-2. **SmartScreen “Windows protected your PC”**  
-   - Click **More info**  
-   - Click **Run anyway**
-
-3. **Defender deleted or quarantined a file**  
-   - Open **Windows Security** → **Virus & threat protection** → **Protection history**  
-   - Find the blocked item related to this folder  
-   - Choose **Allow** / **Restore**  
-   - Optionally: **Manage settings** → **Exclusions** → **Add an exclusion** → **Folder**  
-     and select this app folder (the one that contains `install.bat`)
-
-4. **Still blocked**  
-   - Temporarily turn off real-time protection, run `install.bat` / `start.bat`, then turn protection back on  
-   - Or ask whoever manages the PC (work laptop policies can block this)
-
-**Note:** Running as admin is for **installing and starting** the app on a locked-down PC. Your money data still stays on this computer. Only use admin when Windows will not let the app run otherwise.
+The recommended way to run it on Windows is **Docker Desktop**.
 
 ---
 
-## What you will do (overview)
+## What you need
 
-1. **One-time setup** on the computer (about 15–20 minutes)  
-2. **Start the app** with a double-click (or **Run as administrator** if Defender blocks it)  
-3. **Sign in** in your web browser  
-4. Enter your bills and income at your own pace  
+1. [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
+2. This app folder (clone or download the ZIP from this repository)
 
----
-
-## Before you start (one-time downloads)
-
-You only need these if this computer does not already have them.
-
-### 1) Python (required)
-
-1. Open this page: [https://www.python.org/downloads/](https://www.python.org/downloads/)  
-2. Click the big yellow **Download Python** button  
-3. Run the installer  
-4. **Very important:** on the first screen, check the box that says  
-   **“Add python.exe to PATH”**  
-5. Click **Install Now** and finish  
-
-If you already installed Python earlier without that box, uninstall Python from Windows Settings, then install again with the box checked.
-
-### 2) Get the app folder onto this computer
-
-**Easiest if someone sent you a zip file**
-
-1. Download the zip  
-2. Right-click it → **Extract All…**  
-3. Choose a simple place, such as:  
-   `Documents\HouseholdMoney`  
-4. Open the extracted folder  
-
-**Or download from GitHub (website only — no typing)**
-
-1. Open: [https://github.com/SyphenAI/budgeting](https://github.com/SyphenAI/budgeting)  
-2. Click the green **Code** button  
-3. Click **Download ZIP**  
-4. Extract the zip as above  
+You do **not** need to install Python if you use Docker.
 
 ---
 
-## First-time setup
+## First-time setup (Windows + Docker Desktop)
 
-1. Open the app folder  
-2. Find the file named **`install.bat`**  
-3. Right-click it → **Run as administrator**  
-   - (If that works without admin later, a normal double-click is fine)  
-4. If Windows says it protected your PC: **More info** → **Run anyway**  
-5. A black window will show progress — **wait until it says DONE**  
-6. Press any key to close that window when finished  
+1. Install Docker Desktop and restart if the installer asks you to.
+2. Open **Docker Desktop** and wait until it says it is running.
+3. Put this project in an easy folder, such as `Documents\HouseholdMoney`.
+4. Open that folder in File Explorer.
+5. Right-click **`docker-start.bat`** → **Run as administrator**.
+   - Administrator is so Windows Firewall can allow other devices on your home network.
+   - If SmartScreen says “Windows protected your PC”: **More info** → **Run anyway**.
+6. The first start can take a few minutes while Docker builds the app.
+7. When it says the app is ready, your browser should open to:
 
-That step may create a desktop shortcut named **Household Money** when possible.
+**http://127.0.0.1:50100**
+
+If the browser does not open, type that address into Chrome or Edge.
 
 ---
 
 ## Every time you want to use the app
 
-1. Right-click **`start.bat`** → **Run as administrator**  
-   - (or double-click if your PC allows it)  
-   - or use the **Household Money** shortcut if setup created one  
-2. Wait until the window says **App is ready** (can take up to a minute the first time)  
-3. Your browser should open to the app  
-4. Leave the window titled **“Household Money - keep open”** running while you work  
-5. When finished, close that **keep open** window  
+1. Start **Docker Desktop** and wait until it is running.
+2. Right-click **`docker-start.bat`** → **Run as administrator** (or double-click if your PC allows it).
+3. Leave Docker Desktop running while you use the app.
+4. When finished, double-click **`docker-stop.bat`**.
 
-If the browser opens but the page fails, wait 10 seconds and press **Refresh** (F5).
-
-If the browser does not open, open Chrome or Edge and type exactly:
-
-**http://127.0.0.1:8787**
-
-### If the page still will not load
-
-1. Look at the **“Household Money - keep open”** window for red error text  
-2. Confirm you used **Run as administrator** if Defender was blocking things  
-3. Run **`install.bat`** again (as admin), then **`start.bat`** (as admin)  
-4. Restart the computer once, then try **`start.bat`** again  
-5. Make sure you are using the folder that contains **both** `install.bat` and the `backend` folder (not an empty outer folder from the zip)
+Your budget stays in the `data` folder. Stopping Docker does not erase it.
 
 ---
-
 
 ## Sign in (first time)
 
@@ -133,10 +55,28 @@ If the browser does not open, open Chrome or Edge and type exactly:
 | Username | `admin` |
 | Password | `admin` |
 
-The app will then **make you choose a new password**.  
-Pick something only you know. Do not share it with kids.
+The app will ask you to choose a **new password**. Pick one only you know.
 
-After that, you can add a spouse or partner login under **Household** if you want both adults to use it.
+You can add another adult login later under **Household**.
+
+---
+
+## Use it from a phone or another computer
+
+The app listens on **port 50100** on the computer running Docker, including that computer’s `192.` address.
+
+1. On the computer running the app, look at the `docker-start.bat` window.
+2. It prints a line like **http://192.168.x.x:50100**.
+3. On the other device, open that address in a browser.
+4. Use the same login.
+
+The other device must be on the **same Wi-Fi or home network**. Guest Wi-Fi, VPN, and cellular data often block this.
+
+If the page works on the Docker computer but not on a phone:
+
+- Run **`docker-start.bat` as administrator** once so the firewall rule is added
+- In **Windows Security** → **Firewall**, allow inbound **TCP 50100** on **Private** networks
+- Confirm the phone is on the same `192.` network
 
 ---
 
@@ -144,78 +84,79 @@ After that, you can add a spouse or partner login under **Household** if you wan
 
 | Screen | What it’s for |
 |--------|----------------|
-| **Home** | Your month calendar, balances, and overview |
-| **Money in / out** | Add bills, estimates, paychecks, real spending |
+| **Home** | Month calendar, balances, and overview |
+| **Money in / out** | Bills, estimates, paychecks, real spending |
 | **Pay stub** | Upload a pay stub PDF and put pay on the calendar |
-| **Goals** | Things you are saving for (vacation, emergency fund, etc.) |
+| **Goals** | Savings targets (vacation, emergency fund, etc.) |
 | **Debt plan** | Credit cards / loans — simple payoff plan |
 | **Investments** | Simple “what is this account worth?” list |
-| **Import** | Optional: bank CSV download (not PDF statements) |
+| **Import** | Optional bank CSV or supported PDF statement import |
 | **Household** | Rename household, change password, add/remove people |
 
 ---
 
 ## Common problems
 
-**“Python was not found” when I run install.bat**  
-Install Python again and check **Add python.exe to PATH**, then run `install.bat` again.
+**Docker was not found / Docker is not running**  
+Install Docker Desktop, open it, wait until it says it is running, then run `docker-start.bat` again.
 
-**Browser shows “can’t connect” / page won’t load**  
-- Run `start.bat` again and wait 5 seconds  
-- Make sure you open **http://127.0.0.1:8787** (not google.com search)  
-- Leave the black window open  
+**Browser shows “can’t connect”**  
+- Confirm Docker Desktop is running  
+- Wait 10 seconds and refresh  
+- Open **http://127.0.0.1:50100** exactly (do not search for it in Google)  
+- Run `docker-start.bat` again  
 
-**I forgot my password**  
-Someone technical can delete the file `data\budget.db` and run the app again.  
-That resets logins **and** erases budget data on that computer — only do this if you accept losing that data.
+**Windows blocked the `.bat` file**  
+Right-click → **Run as administrator**. On SmartScreen: **More info** → **Run anyway**.
 
-**Kids got into the app**  
-Change your password under **Household**, and use the 10-minute auto sign-out (already built in).
+**Forgot the password**  
+Someone can delete `data\budget.db` and start the app again. That resets logins **and** erases budget data on that computer.
 
----
-
-## Privacy (simple version)
-
-- Your budget lives in a file on **this computer** (`data` folder)  
-- It is **not** uploaded to GitHub when you download the app  
-- Do not email pay stubs or bank statements into the app folder if you also share that folder with others  
+**Phone cannot load the page**  
+See [Use it from a phone or another computer](#use-it-from-a-phone-or-another-computer). The phone must be on the same local network, and Windows Firewall must allow port **50100**.
 
 ---
 
-## Getting a newer version (update)
+## Privacy
 
-When we release improvements, you can update **without losing your budget**.
-
-1. Close the app (close any “Household Money - keep open” window)  
-2. Open your app folder  
-3. Right-click **`update.bat`** → **Run as administrator**  
-4. Read the message, then press a key to continue  
-5. Wait until it says **Update finished**  
-6. Right-click **`start.bat`** → **Run as administrator**  
-
-**What update does**
-- Downloads the latest app from the official GitHub page only  
-- Replaces program files  
-- **Keeps** your `data` folder (balances, logins, entries)  
-- Does **not** run in the background every time you start the app — you choose when to update  
-
-**If update fails**
-- Download a fresh ZIP from GitHub  
-- Copy your old `data` folder into the new folder  
-- Run `install.bat`, then `start.bat`  
+- Budget data lives in the `data` folder on the computer running the app
+- That folder is not uploaded when you download this project
+- Do not commit or email pay stubs, bank statements, or `data\budget.db`
 
 ---
 
-## For helpers / advanced users only
+## Getting a newer version
 
-Command-line and Docker instructions are optional. Most people should use **`install.bat`** and **`start.bat`** only.
+1. Stop the app (`docker-stop.bat`)
+2. Right-click **`update.bat`** → **Run as administrator**
+3. When it finishes, run **`docker-start.bat`** again
+
+The update keeps your `data` folder.
+
+If update fails: download a fresh ZIP, copy your old `data` folder into the new folder, then run `docker-start.bat`.
+
+---
+
+## Optional: run without Docker
+
+This path needs [Python for Windows](https://www.python.org/downloads/) with **Add python.exe to PATH** checked.
+
+1. Right-click **`install.bat`** → **Run as administrator** (first time only)
+2. Right-click **`start.bat`** → **Run as administrator**
+3. Open **http://127.0.0.1:50100**
+
+Command-line equivalent:
 
 ```text
 python -m venv .venv
 .venv\Scripts\python -m pip install -r backend\requirements.txt
-.venv\Scripts\python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8787
+.venv\Scripts\python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 50100
 ```
 
-Docker: `docker compose up --build -d` then open http://localhost:8787
+Or, if Docker is already installed:
 
-Developers: see `NOTES.md` for product design notes. Sample bank CSVs are in `samples/bank-csv/` (fake data only).
+```text
+docker compose up --build -d
+```
+
+Then open **http://127.0.0.1:50100**.

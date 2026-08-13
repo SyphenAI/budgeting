@@ -2,7 +2,20 @@ services:
   budget:
     build: .
     ports:
-      - "8787:8787"
+      # Bind all host interfaces so phones/PCs on the 192.x LAN can connect.
+      - "0.0.0.0:50100:50100"
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:50100/', timeout=3)",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

@@ -113,7 +113,7 @@ echo  Next steps:
 echo    1. Double-click start.bat in this folder
 if "%SHORTCUT_OK%"=="1" echo       (or the Household Money shortcut if you see one)
 echo    2. Wait until it says the app is ready
-echo    3. Browser should open to http://127.0.0.1:8787
+echo    3. Browser should open to http://127.0.0.1:50100
 echo    4. Sign in with:
 echo         Username: admin
 echo         Password: admin
