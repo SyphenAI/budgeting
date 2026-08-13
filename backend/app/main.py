@@ -82,6 +82,14 @@ from .categorize import (
     suggest_category,
 )
 from .seed import seed_if_empty
+from .updater import (
+    apply_update,
+    fetch_latest_version,
+    is_newer,
+    read_local_version,
+    running_in_docker,
+    schedule_restart,
+)
 
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -1826,11 +1834,98 @@ def index():
 
 @app.get("/api/version")
 def app_version():
-    ver_path = ROOT / "VERSION"
-    ver = "unknown"
-    if ver_path.exists():
-        ver = ver_path.read_text(encoding="utf-8").strip() or "unknown"
+    ver = read_local_version()
     return {
         "version": ver,
         "chase_pdf_import": (ROOT / "backend" / "app" / "bank_pdf.py").exists(),
+    }
+
+
+def _can_update(user: User) -> bool:
+    return user.role in ("owner", "admin", "partner")
+
+
+@app.get("/api/update/status")
+def update_status(user: User = Depends(current_user)):
+    """Plain-language status for the Household settings Update button."""
+    current = read_local_version()
+    latest = None
+    check_ok = True
+    check_error = ""
+    try:
+        latest = fetch_latest_version()
+    except Exception as exc:
+        check_ok = False
+        check_error = str(exc) or "Could not check for a newer version."
+
+    available = bool(latest and is_newer(latest, current))
+    if not check_ok:
+        message = (
+            "Could not check for a newer version. "
+            "This computer needs internet, then tap Check again."
+        )
+    elif available:
+        message = (
+            f"A newer version is ready ({latest}). "
+            "Your bills, passwords, and budget stay on this computer."
+        )
+    else:
+        message = f"You're all set. This computer already has the latest version ({current})."
+
+    return {
+        "current": current,
+        "latest": latest,
+        "update_available": available,
+        "can_update": _can_update(user),
+        "in_docker": running_in_docker(),
+        "check_ok": check_ok,
+        "check_error": check_error,
+        "message": message,
+    }
+
+
+@app.post("/api/update/apply")
+def update_apply(user: User = Depends(current_user)):
+    """Download the official app and replace program files. Keeps the data folder."""
+    if not _can_update(user):
+        raise HTTPException(
+            status_code=403,
+            detail="Ask the person who set up this app to run the update.",
+        )
+    current = read_local_version()
+    try:
+        latest = fetch_latest_version()
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not reach the update. Check internet on this computer, then try again.",
+        )
+    if not is_newer(latest, current):
+        return {
+            "ok": True,
+            "updated": False,
+            "version": current,
+            "restarting": False,
+            "message": f"You're already on the latest version ({current}). Nothing to do.",
+        }
+    try:
+        new_ver = apply_update()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="The update did not finish. Nothing was erased. Try again in a minute.",
+        )
+
+    schedule_restart(1.8)
+    return {
+        "ok": True,
+        "updated": True,
+        "version": new_ver or latest,
+        "restarting": True,
+        "message": (
+            "Update installed. Please wait — this page will come back by itself. "
+            "Your money data was not changed."
+        ),
     }

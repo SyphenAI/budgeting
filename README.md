@@ -127,13 +127,22 @@ See [Use it from a phone or another computer](#use-it-from-a-phone-or-another-co
 
 ## Getting a newer version
 
-1. Stop the app (`docker-stop.bat`)
+Easiest (no extra files):
+
+1. Sign in
+2. Open **Household** on the left
+3. Find **App updates**
+4. Tap **Check for a newer version**
+5. If it says a newer version is ready, tap **Update now**
+6. Wait. The page comes back by itself. Your bills and passwords stay on this computer.
+
+The computer needs internet for this step.
+
+If the button cannot run:
+
+1. Double-click **`docker-stop.bat`**
 2. Right-click **`update.bat`** → **Run as administrator**
 3. When it finishes, run **`docker-start.bat`** again
-
-The update keeps your `data` folder.
-
-If update fails: download a fresh ZIP, copy your old `data` folder into the new folder, then run `docker-start.bat`.
 
 ---
 

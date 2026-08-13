@@ -4,8 +4,11 @@ services:
     ports:
       # Bind all host interfaces so phones/PCs on the 192.x LAN can connect.
       - "0.0.0.0:50100:50100"
+    environment:
+      BUDGET_IN_DOCKER: "1"
     volumes:
-      - ./data:/app/data
+      # Mount the whole app folder so an in-app Update writes to this computer.
+      - .:/app
     restart: unless-stopped
     healthcheck:
       test:

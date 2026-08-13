@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Household Money</title>
   <link rel="icon" type="image/png" href="/brand/assets/logo_icon.png" />
-  <link rel="stylesheet" href="/brand/base.css?v=1.5.0" />
-  <link rel="stylesheet" href="/static/css/app.css?v=1.5.0" />
+  <link rel="stylesheet" href="/brand/base.css?v=1.5.1" />
+  <link rel="stylesheet" href="/static/css/app.css?v=1.5.1" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-  <script src="/static/js/app.js?v=1.5.0" defer></script>
+  <script src="/static/js/app.js?v=1.5.1" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -1008,6 +1008,19 @@
                 <button class="btn btn-outline" type="submit">Add login</button>
                 <span id="member-msg" class="form-hint" style="margin-left:0.75rem"></span>
               </form>
+            </div>
+            <div class="form-panel">
+              <h2>App updates
+                <button type="button" class="help-icon" data-help="Checks for a newer Household Money on the internet, then installs it on this computer. Your bills, passwords, and budget stay here. Takes a minute. The page will come back by itself.">?</button>
+              </h2>
+              <p class="lead">New versions can add easier buttons and fixes. This does <strong>not</strong> change your budget numbers.</p>
+              <p class="form-hint" id="update-current" style="margin-top:0.75rem">Looking up the version on this computer…</p>
+              <p id="update-msg" class="update-status" style="margin-top:0.5rem"></p>
+              <div class="backup-actions" style="margin-top:0.85rem">
+                <button class="btn btn-outline" type="button" id="btn-update-check">Check for a newer version</button>
+                <button class="btn btn-primary" type="button" id="btn-update-apply" disabled>Update now</button>
+              </div>
+              <p class="form-hint" style="margin-top:0.75rem">Need internet on this computer. If Update now is gray, you already have the latest — or tap Check first.</p>
             </div>
             <div class="form-panel">
               <h2>Backup &amp; restore

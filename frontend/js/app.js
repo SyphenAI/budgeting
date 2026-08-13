@@ -1748,6 +1748,7 @@
     }
     const list = $("#members-list");
     const meName = (state.user && (state.user.username || "")).toLowerCase();
+    await refreshUpdatePanel();
     if (list) {
       list.innerHTML = members
         .map((m) => {
@@ -1784,6 +1785,101 @@
           }
         });
       });
+    }
+  }
+
+  function setUpdateBusy(busy) {
+    const checkBtn = $("#btn-update-check");
+    const applyBtn = $("#btn-update-apply");
+    if (checkBtn) checkBtn.disabled = busy;
+    if (applyBtn && busy) applyBtn.disabled = true;
+  }
+
+  async function refreshUpdatePanel() {
+    const currentEl = $("#update-current");
+    const msgEl = $("#update-msg");
+    const applyBtn = $("#btn-update-apply");
+    if (!currentEl || !msgEl) return;
+    try {
+      const st = await api("/api/update/status");
+      currentEl.innerHTML = `This computer has version <strong class="text-primary">${escapeHtml(st.current || "unknown")}</strong>.`;
+      msgEl.textContent = st.message || "";
+      msgEl.classList.remove("is-error", "is-ready", "is-ok");
+      if (!st.check_ok) msgEl.classList.add("is-error");
+      else if (st.update_available) msgEl.classList.add("is-ready");
+      else msgEl.classList.add("is-ok");
+      if (applyBtn) {
+        applyBtn.disabled = !st.update_available || !st.can_update;
+        if (!st.can_update) {
+          applyBtn.title = "Ask the person who set up this app to tap Update now.";
+        } else {
+          applyBtn.title = st.update_available
+            ? "Install the newer version. Your budget stays here."
+            : "No newer version right now.";
+        }
+      }
+    } catch (ex) {
+      currentEl.textContent = "Could not read the version on this computer.";
+      msgEl.textContent = ex.message || "Try Check for a newer version.";
+      msgEl.classList.add("is-error");
+      if (applyBtn) applyBtn.disabled = true;
+    }
+  }
+
+  async function waitForAppBack(timeoutMs = 90000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 1500));
+      try {
+        const res = await fetch("/api/version", { cache: "no-store" });
+        if (res.ok) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  async function runAppUpdate() {
+    const msgEl = $("#update-msg");
+    const applyBtn = $("#btn-update-apply");
+    if (
+      !confirm(
+        "Update Household Money on this computer?\n\nYour bills, passwords, and budget stay here.\nThe page will pause for about a minute, then come back."
+      )
+    ) {
+      return;
+    }
+    setUpdateBusy(true);
+    if (msgEl) {
+      msgEl.classList.remove("is-error", "is-ready", "is-ok");
+      msgEl.textContent = "Downloading the update. Please leave this page open…";
+    }
+    try {
+      const result = await api("/api/update/apply", { method: "POST" });
+      if (msgEl) msgEl.textContent = result.message || "Update installed. Waiting for the app to come back…";
+      if (result.restarting) {
+        const back = await waitForAppBack();
+        if (back) {
+          window.location.reload();
+          return;
+        }
+        if (msgEl) {
+          msgEl.classList.add("is-error");
+          msgEl.textContent =
+            "The update finished, but this page did not come back by itself. Close this tab, open the app the same way you usually do, then sign in again.";
+        }
+      } else {
+        await refreshUpdatePanel();
+      }
+    } catch (ex) {
+      if (msgEl) {
+        msgEl.classList.add("is-error");
+        msgEl.textContent = ex.message || "The update did not finish. Nothing was erased. Try again.";
+      }
+    } finally {
+      setUpdateBusy(false);
+      if (applyBtn && msgEl && msgEl.classList.contains("is-error")) {
+        applyBtn.disabled = false;
+      }
     }
   }
 
@@ -2405,6 +2501,27 @@
         msg.textContent = ex.message;
       }
     });
+
+    const btnUpdateCheck = $("#btn-update-check");
+    const btnUpdateApply = $("#btn-update-apply");
+    if (btnUpdateCheck) {
+      btnUpdateCheck.addEventListener("click", async () => {
+        setUpdateBusy(true);
+        const msgEl = $("#update-msg");
+        if (msgEl) {
+          msgEl.classList.remove("is-error", "is-ready", "is-ok");
+          msgEl.textContent = "Checking for a newer version…";
+        }
+        try {
+          await refreshUpdatePanel();
+        } finally {
+          setUpdateBusy(false);
+        }
+      });
+    }
+    if (btnUpdateApply) {
+      btnUpdateApply.addEventListener("click", () => runAppUpdate());
+    }
 
     $("#settings-form").addEventListener("submit", async (e) => {
       e.preventDefault();

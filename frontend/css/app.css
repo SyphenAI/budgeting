@@ -870,6 +870,15 @@ h2 .help-icon,
   max-width: 900px;
 }
 
+.update-status {
+  font-size: 0.92rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+.update-status.is-ok { color: var(--success); }
+.update-status.is-ready { color: var(--warning); }
+.update-status.is-error { color: var(--danger); }
+
 /* Goals */
 .goals-grid {
   display: grid;

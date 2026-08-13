@@ -23,6 +23,7 @@ Design notes for the Household Money app. No personal or household-specific data
 - Auth: first login `admin` / `admin` → force password change
 - Roles: owner, partner, member, viewer
 - 10-minute idle sign-out
+- Household settings: Check / Update now (keeps the data folder)
 
 ## Non-goals (v1)
 
