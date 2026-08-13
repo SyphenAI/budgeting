@@ -24,6 +24,10 @@ Design notes for the Household Money app. No personal or household-specific data
 - Roles: owner, partner, member, viewer
 - 10-minute idle sign-out
 - Household settings: Check / Update now (keeps the data folder)
+- Recurring bills/pay auto-extend into later months
+- Idle timeout default 30 minutes (set under Household)
+- Rescue code resets a password without wiping data
+- Monthly local copies in data/backups
 
 ## Non-goals (v1)
 

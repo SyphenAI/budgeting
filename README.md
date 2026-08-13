@@ -41,10 +41,12 @@ If the browser does not open, type that address into Chrome or Edge.
 
 1. Start **Docker Desktop** and wait until it is running.
 2. Right-click **`docker-start.bat`** → **Run as administrator** (or double-click if your PC allows it).
-3. Leave Docker Desktop running while you use the app.
+3. Leave **Docker Desktop** running while you use the app. Closing it closes the app.
 4. When finished, double-click **`docker-stop.bat`**.
 
 Your budget stays in the `data` folder. Stopping Docker does not erase it.
+
+Monthly bills and every-2-weeks pay keep showing up in later months by themselves. You do not need to copy last month.
 
 ---
 
@@ -58,6 +60,8 @@ Your budget stays in the `data` folder. Stopping Docker does not erase it.
 The app will ask you to choose a **new password**. Pick one only you know.
 
 You can add another adult login later under **Household**.
+
+The app will also show a **rescue code**. Write it on paper. If you forget the password later, tap **I forgot my password** on the sign-in page and type that code. The budget is not erased.
 
 ---
 
@@ -110,7 +114,9 @@ Install Docker Desktop, open it, wait until it says it is running, then run `doc
 Right-click → **Run as administrator**. On SmartScreen: **More info** → **Run anyway**.
 
 **Forgot the password**  
-Someone can delete `data\budget.db` and start the app again. That resets logins **and** erases budget data on that computer.
+On the sign-in page tap **I forgot my password**. Type the rescue code you wrote down and a new password. The budget stays.
+
+If you never made a rescue code, someone who can still sign in should open **Household** and tap **Make a rescue code**.
 
 **Phone cannot load the page**  
 See [Use it from a phone or another computer](#use-it-from-a-phone-or-another-computer). The phone must be on the same local network, and Windows Firewall must allow port **50100**.
@@ -146,26 +152,6 @@ If the button cannot run:
 
 ---
 
-## Optional: run without Docker
+## For the person who set this up
 
-This path needs [Python for Windows](https://www.python.org/downloads/) with **Add python.exe to PATH** checked.
-
-1. Right-click **`install.bat`** → **Run as administrator** (first time only)
-2. Right-click **`start.bat`** → **Run as administrator**
-3. Open **http://127.0.0.1:50100**
-
-Command-line equivalent:
-
-```text
-python -m venv .venv
-.venv\Scripts\python -m pip install -r backend\requirements.txt
-.venv\Scripts\python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 50100
-```
-
-Or, if Docker is already installed:
-
-```text
-docker compose up --build -d
-```
-
-Then open **http://127.0.0.1:50100**.
+Family members should use Docker Desktop only. The Python `install.bat` path is for you, not for them.

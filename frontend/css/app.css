@@ -450,6 +450,26 @@ h2 .help-icon,
   border: 1px solid var(--border);
 }
 
+.home-notes {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0 0 0.85rem;
+}
+.note-card {
+  background: var(--bg-dark-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.7rem 0.85rem;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+.note-card.note-warn {
+  border-color: var(--brand-border);
+  background: rgba(200, 16, 46, 0.08);
+  color: var(--text-primary);
+}
+
 /* Dashboard grid */
 .dash-top {
   display: grid;
@@ -1119,20 +1139,36 @@ tr.import-dup td { background: rgba(210, 153, 34, 0.08); }
     overflow-x: auto;
     border-right: none;
     border-bottom: 1px solid var(--border);
-    padding: 0.4rem 0.5rem;
-    gap: 0.25rem;
+    padding: 0.45rem 0.5rem;
+    gap: 0.35rem;
     position: sticky;
     top: var(--nav-height, 56px);
     z-index: 20;
+    -webkit-overflow-scrolling: touch;
   }
   .sidebar-foot { display: none; }
   .sidebar .nav-btn {
     white-space: nowrap;
-    padding: 0.45rem 0.65rem;
-    font-size: 0.8rem;
+    padding: 0.6rem 0.85rem;
+    font-size: 0.9rem;
+    min-height: 44px;
   }
   .sidebar .nav-icon { display: none; }
-  .cal-cell { min-height: 90px; }
+  .calendar-wrap,
+  #calendar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cal-grid,
+  .cal-weekdays {
+    min-width: 560px;
+  }
+  .cal-cell { min-height: 104px; }
+  .pill {
+    font-size: 0.72rem;
+    padding: 0.28rem 0.4rem;
+    min-height: 1.4rem;
+  }
   .settings-grid { grid-template-columns: 1fr; }
   .page-head {
     flex-direction: column;
@@ -1143,6 +1179,7 @@ tr.import-dup td { background: rgba(210, 153, 34, 0.08); }
     flex-wrap: wrap;
     justify-content: flex-start;
   }
+  .month-nav .btn { min-height: 44px; }
   .main-pane { padding: 0.85rem 0.75rem 2rem; }
   .day-expand-head {
     flex-direction: column;
@@ -1159,17 +1196,20 @@ tr.import-dup td { background: rgba(210, 153, 34, 0.08); }
   .import-toolbar .btn { width: 100%; }
   table.data { font-size: 0.8rem; }
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .login-card { width: min(440px, 100%); padding: 1.35rem 1.1rem; }
+  input, select, textarea { min-height: 44px; font-size: 16px; }
 }
 
 @media (max-width: 640px) {
   .metrics-grid { grid-template-columns: 1fr 1fr; }
-  .pill { font-size: 0.58rem; }
-  .cal-balance { font-size: 0.6rem; }
-  .cal-cell { min-height: 72px; padding: 0.25rem; }
+  .pill { font-size: 0.7rem; }
+  .cal-balance { font-size: 0.68rem; }
+  .cal-cell { min-height: 96px; padding: 0.35rem; }
   .dash-name-wrap {
     flex-wrap: wrap;
   }
-  .btn { min-height: 2.25rem; }
-  .day-actions .btn { min-height: 2rem; padding: 0.25rem 0.45rem; }
+  .btn { min-height: 44px; }
+  .day-actions .btn { min-height: 44px; padding: 0.4rem 0.6rem; }
   .onboarding-panel { padding: 0.85rem; }
+  .snapshot-hero { grid-template-columns: 1fr; }
 }

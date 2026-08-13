@@ -1,6 +1,6 @@
 /* Household Money — frontend */
 (() => {
-  const IDLE_MS = 10 * 60 * 1000; // 10 minutes — local shared-PC safety
+  const DEFAULT_IDLE_MIN = 30;
 
   const state = {
     token: localStorage.getItem("budget_token") || "",
@@ -15,6 +15,7 @@
     snapshot: null,
     selectedDate: null,
     idleTimer: null,
+    idleMinutes: DEFAULT_IDLE_MIN,
     lastActivity: Date.now(),
     importRows: [],
     importCategories: [],
@@ -195,12 +196,23 @@
     }
   }
 
+  function idleMs() {
+    const mins = Number(state.idleMinutes) || DEFAULT_IDLE_MIN;
+    return Math.max(10, Math.min(120, mins)) * 60 * 1000;
+  }
+
+  function applyIdleMinutes(mins) {
+    const n = Number(mins);
+    state.idleMinutes = Number.isFinite(n) && n > 0 ? n : DEFAULT_IDLE_MIN;
+    armIdleTimer();
+  }
+
   function armIdleTimer() {
     clearIdleTimer();
     if (!state.token) return;
     state.idleTimer = setTimeout(() => {
       idleLogout();
-    }, IDLE_MS);
+    }, idleMs());
   }
 
   function touchActivity() {
@@ -216,7 +228,7 @@
       const err = $("#login-error");
       if (err) {
         err.textContent =
-          "Signed out after 10 minutes of no activity (keeps kids and shared PCs safer).";
+          `Signed out after ${state.idleMinutes || DEFAULT_IDLE_MIN} minutes with no tapping. Sign in again.`;
         err.classList.add("show");
       }
     }
@@ -248,7 +260,7 @@
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && state.token) {
         // If tab was hidden past idle window, sign out on return
-        if (Date.now() - state.lastActivity >= IDLE_MS) {
+        if (Date.now() - state.lastActivity >= idleMs()) {
           idleLogout();
         } else {
           armIdleTimer();
@@ -274,6 +286,7 @@
     state.user = data;
     if (data.token) localStorage.setItem("budget_token", data.token);
     $("#user-badge").textContent = `${data.display_name || data.username} · ${roleLabel(data.role)}`;
+    if (data.idle_minutes) applyIdleMinutes(data.idle_minutes);
     state.lastActivity = Date.now();
     armIdleTimer();
     if (data.must_change_password) {
@@ -299,7 +312,7 @@
   }
 
   async function submitPasswordChange(currentPassword, newPassword) {
-    await api("/api/me/password", {
+    const result = await api("/api/me/password", {
       method: "POST",
       json: {
         current_password: currentPassword,
@@ -307,9 +320,23 @@
       },
     });
     if (state.user) state.user.must_change_password = false;
+    if (result && result.rescue_code) {
+      showRescueReveal(result.rescue_code);
+      return;
+    }
     showPasswordGate(false);
     showApp(true);
     await refreshAll();
+  }
+
+  function showRescueReveal(code) {
+    const box = $("#rescue-reveal");
+    const val = $("#rescue-code-value");
+    const form = $("#pw-gate-form");
+    if (val) val.textContent = code;
+    if (form) form.hidden = true;
+    if (box) box.hidden = false;
+    showPasswordGate(true);
   }
 
   function setView(name) {
@@ -357,6 +384,7 @@
     state.metrics = metrics;
     state.household = hh;
     state.snapshot = snap;
+    if (hh && hh.idle_minutes) applyIdleMinutes(hh.idle_minutes);
     setHouseholdNameDisplay(hh.name);
     const sub = $("#dash-sub");
     if (sub) {
@@ -370,6 +398,7 @@
     renderSnapshot(snap);
     renderStats(metrics, cal);
     renderThresholdBanner(cal);
+    await renderHomeNotes();
     renderCalendar(cal);
     renderCharts(metrics);
     renderUpcoming(upcoming.items || []);
@@ -478,16 +507,11 @@
         <p>${
           brandNew
             ? "No bank login needed. Add a few bills and a paycheck, or import a statement. Everything stays on this PC."
-            : "Use Copy last month for recurring bills, add items on Input, or import a bank statement for actual spending."
+            : "Add a bill or paycheck, or import a bank statement. Rent and regular pay show up in later months by themselves."
         }</p>
         <div class="coach-actions">
           <button type="button" class="btn btn-primary btn-sm" data-go-view="input">Add money in/out</button>
           <button type="button" class="btn btn-outline btn-sm" data-go-view="import">Import statement</button>
-          ${
-            !brandNew
-              ? `<button type="button" class="btn btn-outline btn-sm" id="coach-copy-month">Copy last month</button>`
-              : ""
-          }
         </div>
       </div>
       <div class="coach-card coach-tips">
@@ -502,8 +526,39 @@
     el.querySelectorAll("[data-go-view]").forEach((btn) => {
       btn.addEventListener("click", () => setView(btn.dataset.goView));
     });
-    const copyBtn = $("#coach-copy-month");
-    if (copyBtn) copyBtn.addEventListener("click", () => copyLastMonth());
+  }
+
+  async function renderHomeNotes() {
+    const el = $("#home-notes");
+    if (!el) return;
+    let runtime = null;
+    try {
+      runtime = await api("/api/runtime");
+    } catch (_) {
+      el.innerHTML = "";
+      return;
+    }
+    if (runtime.idle_minutes) applyIdleMinutes(runtime.idle_minutes);
+    const notes = [];
+    if (runtime.in_docker) {
+      notes.push(
+        `<div class="note-card">Leave <strong>Docker Desktop</strong> running while you use this. Closing it closes the app.</div>`
+      );
+    }
+    if (runtime.backup_nag) {
+      notes.push(
+        `<div class="note-card note-warn">No backup this month yet. Open <button type="button" class="btn btn-ghost btn-sm" data-go-view="settings">Household</button> and tap <strong>Save a copy on this computer</strong>.</div>`
+      );
+    }
+    if (!runtime.has_recovery_key) {
+      notes.push(
+        `<div class="note-card note-warn">Make a <strong>rescue code</strong> under Household so a forgotten password does not erase your budget.</div>`
+      );
+    }
+    el.innerHTML = notes.join("");
+    el.querySelectorAll("[data-go-view]").forEach((btn) => {
+      btn.addEventListener("click", () => setView(btn.dataset.goView));
+    });
   }
 
   function buildPrintReport() {
@@ -1746,6 +1801,17 @@
     if ($("#hh-state")) {
       $("#hh-state").value = (hh.state || "").toUpperCase();
     }
+    if ($("#hh-idle")) {
+      const idle = String(hh.idle_minutes || DEFAULT_IDLE_MIN);
+      $("#hh-idle").value = ["10", "20", "30", "60", "120"].includes(idle) ? idle : "30";
+    }
+    const rescueStatus = $("#rescue-status");
+    if (rescueStatus) {
+      rescueStatus.textContent = hh.has_recovery_key
+        ? "A rescue code is already set. If you lost the paper, make a new one (the old one stops working)."
+        : "You do not have a rescue code yet. Make one now and write it down.";
+    }
+    await refreshBackupStatus();
     const list = $("#members-list");
     const meName = (state.user && (state.user.username || "")).toLowerCase();
     await refreshUpdatePanel();
@@ -1785,6 +1851,23 @@
           }
         });
       });
+    }
+  }
+
+  async function refreshBackupStatus() {
+    const el = $("#backup-local-status");
+    if (!el) return;
+    try {
+      const st = await api("/api/backup/status");
+      if (st.last_backup) {
+        el.textContent = st.backup_this_month
+          ? `A copy was saved this month (${st.last_backup}). Folder: data/backups.`
+          : `Last copy: ${st.last_backup}. Save a new one this month.`;
+      } else {
+        el.textContent = "No copy saved yet on this computer.";
+      }
+    } catch (_) {
+      el.textContent = "";
     }
   }
 
@@ -2286,6 +2369,41 @@
       }
     });
 
+    const forgotBtn = $("#btn-forgot");
+    const recoverForm = $("#recover-form");
+    if (forgotBtn && recoverForm) {
+      forgotBtn.addEventListener("click", () => {
+        recoverForm.hidden = !recoverForm.hidden;
+      });
+    }
+    if (recoverForm) {
+      recoverForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = $("#recover-msg");
+        if (msg) msg.textContent = "Checking the rescue code…";
+        try {
+          const res = await fetch("/api/recover", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              rescue_code: $("#recover-code").value,
+              new_password: $("#recover-pass").value,
+              username: $("#recover-user").value.trim() || null,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(data.detail || "Could not reset the password");
+          }
+          if (msg) msg.textContent = data.message || "Password reset. Sign in above.";
+          if ($("#password")) $("#password").value = "";
+          if ($("#username") && data.username) $("#username").value = data.username;
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message || "Could not reset the password";
+        }
+      });
+    }
+
     $("#btn-logout").addEventListener("click", () => logout(true));
     $("#logo-home").addEventListener("click", (e) => {
       e.preventDefault();
@@ -2403,6 +2521,52 @@
 
     const backupBtn = $("#btn-backup");
     if (backupBtn) backupBtn.addEventListener("click", () => downloadBackup());
+    const backupLocalBtn = $("#btn-backup-local");
+    if (backupLocalBtn) {
+      backupLocalBtn.addEventListener("click", async () => {
+        const msg = $("#backup-msg");
+        try {
+          const res = await api("/api/backup/local", { method: "POST" });
+          if (msg) msg.textContent = res.message || "Saved on this computer.";
+          await refreshBackupStatus();
+          await renderHomeNotes();
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message || "Could not save a copy.";
+        }
+      });
+    }
+    const rescueNewBtn = $("#btn-rescue-new");
+    if (rescueNewBtn) {
+      rescueNewBtn.addEventListener("click", async () => {
+        if (
+          !confirm(
+            "Make a new rescue code?\n\nWrite the next code down. The old code will stop working. Your budget is not erased."
+          )
+        ) {
+          return;
+        }
+        const out = $("#rescue-settings-code");
+        const msg = $("#rescue-settings-msg");
+        try {
+          const res = await api("/api/household/rescue-code", { method: "POST" });
+          if (out) out.textContent = res.rescue_code || "";
+          if (msg) msg.textContent = "Write this down now. It will not be shown again.";
+          const st = $("#rescue-status");
+          if (st) st.textContent = "A rescue code is set. Keep the paper somewhere safe.";
+          await renderHomeNotes();
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message || "Could not make a rescue code.";
+        }
+      });
+    }
+    const rescueOk = $("#rescue-code-ok");
+    if (rescueOk) {
+      rescueOk.addEventListener("click", async () => {
+        showPasswordGate(false);
+        showApp(true);
+        await refreshAll();
+      });
+    }
     const restoreFile = $("#restore-file");
     if (restoreFile) {
       restoreFile.addEventListener("change", async () => {
@@ -2430,10 +2594,10 @@
       const f = freqEl.value;
       if (f === "monthly") {
         hint.textContent =
-          "Puts this on the same calendar day for the next few months (e.g. rent on the 1st).";
+          "Same day each month (like rent). Later months fill in by themselves.";
       } else if (f === "biweekly") {
         hint.textContent =
-          "Like many paychecks — fills the calendar every 14 days from the date you pick (~3 months).";
+          "Every 2 weeks (like many paychecks). Later months fill in by themselves.";
       } else {
         hint.textContent = "Only the date you pick — nothing repeats.";
       }
@@ -2487,9 +2651,9 @@
           msg.textContent =
             "Bank balance saved — calendar act/est restart from that date.";
         } else if (freq === "monthly") {
-          msg.textContent = "Saved — same day added for the next few months on the calendar.";
+          msg.textContent = "Saved. It will keep showing up on that day each month.";
         } else if (freq === "biweekly") {
-          msg.textContent = "Saved — every-2-weeks dates added on the calendar (~3 months).";
+          msg.textContent = "Saved. It will keep showing up every 2 weeks.";
         } else {
           msg.textContent = "Saved.";
         }
@@ -2544,8 +2708,10 @@
             primary_age: Number.isFinite(ageRaw) ? ageRaw : 0,
             partner_age: Number.isFinite(partnerRaw) ? partnerRaw : 0,
             state: $("#hh-state") ? $("#hh-state").value : "",
+            idle_minutes: $("#hh-idle") ? parseInt($("#hh-idle").value, 10) : DEFAULT_IDLE_MIN,
           },
         });
+        if ($("#hh-idle")) applyIdleMinutes(parseInt($("#hh-idle").value, 10));
         msg.textContent = "Saved.";
         await refreshDashboard();
       } catch (ex) {
@@ -2725,14 +2891,24 @@
           return;
         }
         try {
-          await api("/api/me/password", {
+          const res = await api("/api/me/password", {
             method: "POST",
             json: {
               current_password: $("#set-pw-current").value,
               new_password: n1,
             },
           });
-          if (msg) msg.textContent = "Password updated.";
+          if (res && res.rescue_code) {
+            if (msg) {
+              msg.textContent =
+                "Password updated. Write this rescue code down — it will not be shown again: " +
+                res.rescue_code;
+            }
+            const out = $("#rescue-settings-code");
+            if (out) out.textContent = res.rescue_code;
+          } else if (msg) {
+            msg.textContent = "Password updated.";
+          }
           $("#set-pw-current").value = "";
           $("#set-pw-new").value = "";
           $("#set-pw-new2").value = "";

@@ -1,4 +1,5 @@
 @echo off
+REM Helper-only (not for family). Households should use docker-start.bat.
 setlocal EnableExtensions
 title Household Money - First-time setup
 cd /d "%~dp0"

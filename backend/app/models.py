@@ -38,6 +38,10 @@ class Household(Base):
     primary_age: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     partner_age: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     state: Mapped[str] = mapped_column(String(2), default="")
+    # Minutes of no tapping before sign-out. 0 is not allowed; default 30.
+    idle_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    # Hash of the rescue code used to reset a password without wiping data.
+    recovery_key_hash: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     items: Mapped[list["BudgetItem"]] = relationship(back_populates="household")

@@ -14,4 +14,4 @@ On another device on the same home network: **http://THIS-COMPUTER-192-ADDRESS:5
 
 Later updates: sign in → **Household** → **App updates** → **Check for a newer version** → **Update now**.
 
-Without Docker, use `install.bat` then `start.bat`. That path needs Python. Details are in the README.
+Forgot password: use the rescue code from Household. That does **not** erase the budget.

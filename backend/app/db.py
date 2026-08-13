@@ -80,6 +80,20 @@ def migrate_sqlite() -> None:
                         "VARCHAR(2) NOT NULL DEFAULT ''"
                     )
                 )
+            if "idle_minutes" not in hcols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE households ADD COLUMN idle_minutes "
+                        "INTEGER NOT NULL DEFAULT 30"
+                    )
+                )
+            if "recovery_key_hash" not in hcols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE households ADD COLUMN recovery_key_hash "
+                        "VARCHAR(255) NOT NULL DEFAULT ''"
+                    )
+                )
 
 
 def get_db():

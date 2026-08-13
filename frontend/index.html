@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Household Money</title>
   <link rel="icon" type="image/png" href="/brand/assets/logo_icon.png" />
-  <link rel="stylesheet" href="/brand/base.css?v=1.5.1" />
-  <link rel="stylesheet" href="/static/css/app.css?v=1.5.1" />
+  <link rel="stylesheet" href="/brand/base.css?v=1.6.0" />
+  <link rel="stylesheet" href="/static/css/app.css?v=1.6.0" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-  <script src="/static/js/app.js?v=1.5.1" defer></script>
+  <script src="/static/js/app.js?v=1.6.0" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -47,8 +47,31 @@
       <p class="login-hint">
         First-time only: <span class="mono text-primary">admin</span> /
         <span class="mono text-primary">admin</span>
-        <button type="button" class="help-icon" data-help="On a brand-new install. You must set a new password after login. To fully reset later, delete the data/budget.db file (that erases saved money data).">?</button>
+        <button type="button" class="help-icon" data-help="On a brand-new install. You must set a new password after login.">?</button>
       </p>
+      <p style="margin-top:0.85rem">
+        <button type="button" class="btn btn-ghost btn-sm" id="btn-forgot">I forgot my password</button>
+      </p>
+      <form id="recover-form" hidden style="margin-top:1rem">
+        <p class="text-secondary" style="font-size:0.88rem;margin-bottom:0.75rem">
+          Use the rescue code you wrote down. This changes the password only.
+          Your bills and balances stay.
+        </p>
+        <div class="form-group">
+          <label for="recover-code">Rescue code</label>
+          <input id="recover-code" type="text" autocomplete="off" placeholder="XXXX-XXXX-XXXX" />
+        </div>
+        <div class="form-group">
+          <label for="recover-user">Username (optional)</label>
+          <input id="recover-user" type="text" autocomplete="username" placeholder="Leave blank to reset the owner" />
+        </div>
+        <div class="form-group">
+          <label for="recover-pass">New password</label>
+          <input id="recover-pass" type="password" minlength="4" autocomplete="new-password" />
+        </div>
+        <button class="btn btn-outline btn-block" type="submit">Set new password</button>
+        <p id="recover-msg" class="form-hint" style="margin-top:0.65rem"></p>
+      </form>
     </div>
   </div>
 
@@ -77,6 +100,14 @@
         </div>
         <button class="btn btn-primary btn-block" type="submit">Save password &amp; continue</button>
       </form>
+      <div id="rescue-reveal" hidden style="margin-top:1.1rem">
+        <p class="text-secondary" style="font-size:0.9rem">
+          Write this rescue code on paper and keep it. If you forget your password later,
+          this code resets it <strong>without</strong> erasing the budget.
+        </p>
+        <p id="rescue-code-value" class="mono text-primary" style="font-size:1.15rem;letter-spacing:0.06em;margin:0.75rem 0"></p>
+        <button class="btn btn-primary btn-block" type="button" id="rescue-code-ok">I wrote it down</button>
+      </div>
     </div>
   </div>
 
@@ -122,7 +153,7 @@
           <span class="nav-icon">⚙</span> Household
         </button>
         <div class="sidebar-foot">
-          Local only · 10 min idle sign-out · shared household
+          Local only · signs out after you step away · shared household
         </div>
       </aside>
 
@@ -150,10 +181,6 @@
               <div class="month-label" id="month-label">—</div>
               <button class="btn btn-ghost btn-sm" type="button" id="next-month">→</button>
               <button class="btn btn-outline btn-sm" type="button" id="today-month">Today</button>
-              <button class="btn btn-outline btn-sm" type="button" id="btn-copy-month" title="Copy recurring bills/pay from last month into this month">
-                Copy last month
-              </button>
-              <button type="button" class="help-icon" data-help="Copies weekly/biweekly/monthly bills, estimates, and paychecks from the previous month into the month you are viewing. Skips items that already exist. One-time items are not copied.">?</button>
               <button class="btn btn-primary btn-sm" type="button" id="btn-print-month" title="Print this month’s overview">
                 Print month
               </button>
@@ -161,6 +188,7 @@
             </div>
           </div>
 
+          <div id="home-notes" class="home-notes" aria-live="polite"></div>
           <div id="onboarding-panel" class="onboarding-panel" style="display:none" aria-live="polite"></div>
           <div id="empty-coach" class="empty-coach" style="display:none"></div>
 
@@ -199,7 +227,9 @@
                   <button type="button" class="help-icon" data-help="Tap any date on the calendar to open a list of everything that day — useful when there are lots of small items.">?</button>
                 </span>
               </div>
-              <div class="calendar" id="calendar"></div>
+              <div class="calendar-wrap">
+                <div class="calendar" id="calendar"></div>
+              </div>
               <div class="day-expand" id="day-expand" aria-live="polite">
                 <div class="day-expand-head">
                   <div>
@@ -859,6 +889,18 @@
                   <input id="hh-threshold" class="input-money" type="number" min="0" step="0.01" value="0" />
                   <div class="form-hint">Example: 300 means “flag days that go under $300.” Use 0 for no warnings.</div>
                 </div>
+                <div class="form-group">
+                  <label for="hh-idle">Sign out after I step away
+                    <button type="button" class="help-icon" data-help="If nobody taps the screen for this long, the app signs out so kids or a shared computer cannot stay in. 30 minutes is the usual setting.">?</button>
+                  </label>
+                  <select id="hh-idle">
+                    <option value="10">10 minutes</option>
+                    <option value="20">20 minutes</option>
+                    <option value="30" selected>30 minutes (recommended)</option>
+                    <option value="60">1 hour</option>
+                    <option value="120">2 hours</option>
+                  </select>
+                </div>
                 <hr style="border:none;border-top:1px solid var(--border);margin:1.25rem 0" />
                 <h3 style="margin:0 0 0.5rem;font-size:1rem">You &amp; location
                   <button type="button" class="help-icon" data-help="Age and US state stay on this computer. They help future tips about debt payoff priority, taxes (state vs federal), and when benefits like Medicare or Social Security may matter. Not tax advice and not shared online.">?</button>
@@ -1023,19 +1065,33 @@
               <p class="form-hint" style="margin-top:0.75rem">Need internet on this computer. If Update now is gray, you already have the latest — or tap Check first.</p>
             </div>
             <div class="form-panel">
-              <h2>Backup &amp; restore
-                <button type="button" class="help-icon" data-help="Download a copy of your full local database (budget, goals, debts, logins). Keep it somewhere safe (USB, OneDrive). Restore replaces the current database — sign out after restore.">?</button>
+              <h2>If you forget your password
+                <button type="button" class="help-icon" data-help="A rescue code lets you set a new password without erasing bills. Write it on paper. Making a new code turns the old one off.">?</button>
               </h2>
-              <p class="lead">Everything stays on this computer. Use backup before big changes or when moving to a new PC.</p>
+              <p class="lead">This does <strong>not</strong> erase your budget. You need the rescue code you wrote down.</p>
+              <p id="rescue-status" class="form-hint" style="margin-top:0.65rem"></p>
               <div class="backup-actions">
-                <button class="btn btn-primary" type="button" id="btn-backup">Download backup (.db)</button>
+                <button class="btn btn-outline" type="button" id="btn-rescue-new">Make a rescue code</button>
+              </div>
+              <p id="rescue-settings-code" class="mono text-primary" style="margin-top:0.75rem;font-size:1.05rem;letter-spacing:0.05em"></p>
+              <p id="rescue-settings-msg" class="form-hint" style="margin-top:0.5rem"></p>
+            </div>
+            <div class="form-panel">
+              <h2>Backup &amp; restore
+                <button type="button" class="help-icon" data-help="The app also saves a quiet copy on this computer each month (data/backups). You can save one now, or download a file to a USB stick. Restore replaces the current budget.">?</button>
+              </h2>
+              <p class="lead">Everything stays on this computer. A copy is saved here each month so a mistake is not the end.</p>
+              <p id="backup-local-status" class="form-hint" style="margin-top:0.65rem"></p>
+              <div class="backup-actions">
+                <button class="btn btn-primary" type="button" id="btn-backup-local">Save a copy on this computer</button>
+                <button class="btn btn-outline" type="button" id="btn-backup">Download a file</button>
                 <label class="btn btn-outline" style="cursor:pointer;margin:0">
                   Restore from file…
                   <input type="file" id="restore-file" accept=".db,application/octet-stream" hidden />
                 </label>
               </div>
               <p class="form-hint" id="backup-msg" style="margin-top:0.75rem"></p>
-              <p class="form-hint" style="margin-top:0.5rem">Restore replaces all current data. A safety copy of the old file is kept in the data folder first.</p>
+              <p class="form-hint" style="margin-top:0.5rem">Restore replaces all current data. A safety copy is kept first.</p>
             </div>
             <div class="card">
               <h3 class="card-title">How the calendar works</h3>

@@ -65,6 +65,7 @@ from .schemas import (
     MemberOut,
     MetricsResponse,
     PasswordChangeRequest,
+    RescueResetRequest,
     PayStubApplyRequest,
     ImportCommitRequest,
     ImportCommitResponse,
@@ -82,6 +83,9 @@ from .categorize import (
     suggest_category,
 )
 from .seed import seed_if_empty
+from .recurring import ensure_recurring_through
+from .backup_store import backup_status, maybe_monthly_backup, save_local_backup
+from .rescue import allow_recover_attempt, make_rescue_code, normalize_rescue_code
 from .updater import (
     apply_update,
     fetch_latest_version,
@@ -94,7 +98,9 @@ from .updater import (
 pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # Local shared-PC safety: expire sessions after idle (minutes)
-IDLE_TIMEOUT_MINUTES = 10
+DEFAULT_IDLE_MINUTES = 30
+MIN_IDLE_MINUTES = 10
+MAX_IDLE_MINUTES = 120
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
@@ -118,6 +124,7 @@ def on_startup() -> None:
     db = next(get_db())
     try:
         seed_if_empty(db)
+        maybe_monthly_backup()
     finally:
         db.close()
 
@@ -135,13 +142,14 @@ def current_user(
 
     now = datetime.utcnow()
     last = getattr(row, "last_seen", None) or row.created_at or now
+    idle_minutes = _idle_minutes(db)
     idle_seconds = (now - last).total_seconds()
-    if idle_seconds > IDLE_TIMEOUT_MINUTES * 60:
+    if idle_seconds > idle_minutes * 60:
         db.delete(row)
         db.commit()
         raise HTTPException(
             status_code=401,
-            detail=f"Signed out after {IDLE_TIMEOUT_MINUTES} minutes idle",
+            detail=f"Signed out after {idle_minutes} minutes with no tapping",
         )
 
     row.last_seen = now
@@ -158,6 +166,40 @@ def get_household(db: Session) -> Household:
     if not hh:
         raise HTTPException(status_code=500, detail="No household configured")
     return hh
+
+
+def _idle_minutes(db: Session) -> int:
+    hh = db.query(Household).first()
+    raw = getattr(hh, "idle_minutes", None) if hh else None
+    try:
+        mins = int(raw if raw is not None else DEFAULT_IDLE_MINUTES)
+    except (TypeError, ValueError):
+        mins = DEFAULT_IDLE_MINUTES
+    return max(MIN_IDLE_MINUTES, min(MAX_IDLE_MINUTES, mins or DEFAULT_IDLE_MINUTES))
+
+
+def _household_out(hh: Household) -> HouseholdOut:
+    return HouseholdOut(
+        id=hh.id,
+        name=hh.name,
+        starting_balance=hh.starting_balance,
+        safety_threshold=float(getattr(hh, "safety_threshold", 0) or 0),
+        onboarding_done=bool(getattr(hh, "onboarding_done", False)),
+        currency=hh.currency or "USD",
+        primary_age=getattr(hh, "primary_age", None),
+        partner_age=getattr(hh, "partner_age", None),
+        state=getattr(hh, "state", "") or "",
+        idle_minutes=_clamp_idle(getattr(hh, "idle_minutes", DEFAULT_IDLE_MINUTES)),
+        has_recovery_key=bool(getattr(hh, "recovery_key_hash", "") or ""),
+    )
+
+
+def _clamp_idle(raw) -> int:
+    try:
+        mins = int(raw if raw is not None else DEFAULT_IDLE_MINUTES)
+    except (TypeError, ValueError):
+        mins = DEFAULT_IDLE_MINUTES
+    return max(MIN_IDLE_MINUTES, min(MAX_IDLE_MINUTES, mins or DEFAULT_IDLE_MINUTES))
 
 
 # ── Auth ──────────────────────────────────────────────────────────
@@ -180,6 +222,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         username=user.username,
         role=user.role,
         must_change_password=bool(getattr(user, "must_change_password", False)),
+        idle_minutes=_idle_minutes(db),
     )
 
 
@@ -198,12 +241,13 @@ def logout(
 
 
 @app.get("/api/me")
-def me(user: User = Depends(current_user)):
+def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return {
         "username": user.username,
         "display_name": user.display_name,
         "role": user.role,
         "must_change_password": bool(getattr(user, "must_change_password", False)),
+        "idle_minutes": _idle_minutes(db),
     }
 
 
@@ -227,15 +271,98 @@ def change_password(
 
     user.password_hash = pwd.hash(new_pw)
     user.must_change_password = False
+    hh = get_household(db)
+    rescue_code = None
+    if not (getattr(hh, "recovery_key_hash", "") or ""):
+        rescue_code = make_rescue_code()
+        hh.recovery_key_hash = pwd.hash(normalize_rescue_code(rescue_code))
     db.commit()
-    return {"ok": True, "must_change_password": False}
+    return {
+        "ok": True,
+        "must_change_password": False,
+        "rescue_code": rescue_code,
+        "rescue_code_new": bool(rescue_code),
+    }
+
+
+@app.post("/api/recover")
+def recover_password(body: RescueResetRequest, db: Session = Depends(get_db)):
+    """Reset a login with the rescue code. Does not erase bills or balances."""
+    if not allow_recover_attempt():
+        raise HTTPException(
+            status_code=429,
+            detail="Too many tries. Wait 15 minutes, then try again.",
+        )
+    hh = db.query(Household).first()
+    stored = (getattr(hh, "recovery_key_hash", "") or "") if hh else ""
+    if not stored:
+        raise HTTPException(
+            status_code=400,
+            detail="No rescue code is set yet. Sign in, open Household, and make a rescue code.",
+        )
+    typed = normalize_rescue_code(body.rescue_code)
+    if not typed or not pwd.verify(typed, stored):
+        raise HTTPException(
+            status_code=400,
+            detail="That rescue code did not match. Check the letters and try again.",
+        )
+    new_pw = body.new_password.strip()
+    if len(new_pw) < 4:
+        raise HTTPException(status_code=400, detail="New password must be at least 4 characters")
+    user = None
+    if body.username and body.username.strip():
+        uname = body.username.strip().lower()
+        user = db.query(User).filter(User.username == uname).first()
+        if not user:
+            user = db.query(User).filter(User.username == body.username.strip()).first()
+    if not user:
+        user = (
+            db.query(User)
+            .filter(User.role.in_(("owner", "admin")))
+            .order_by(User.id)
+            .first()
+        )
+    if not user:
+        raise HTTPException(status_code=400, detail="No owner login found to reset.")
+    user.password_hash = pwd.hash(new_pw)
+    user.must_change_password = False
+    # Drop old sessions so the old password cannot stay signed in
+    db.query(SessionToken).filter(SessionToken.user_id == user.id).delete()
+    db.commit()
+    return {
+        "ok": True,
+        "username": user.username,
+        "message": f"Password reset for {user.username}. Your budget was not changed. Sign in with the new password.",
+    }
+
+
+@app.post("/api/household/rescue-code")
+def make_new_rescue_code(
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new rescue code. The old one stops working. Shown once."""
+    if user.role not in ("owner", "admin", "partner"):
+        raise HTTPException(
+            status_code=403,
+            detail="Ask the person who set up this app to make a rescue code.",
+        )
+    hh = get_household(db)
+    code = make_rescue_code()
+    hh.recovery_key_hash = pwd.hash(normalize_rescue_code(code))
+    db.commit()
+    return {
+        "ok": True,
+        "rescue_code": code,
+        "message": "Write this code down and keep it off this screen. It can reset a password without erasing the budget.",
+    }
 
 
 # ── Household ─────────────────────────────────────────────────────
 
 @app.get("/api/household", response_model=HouseholdOut)
 def household_get(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return get_household(db)
+    return _household_out(get_household(db))
 
 
 @app.patch("/api/household", response_model=HouseholdOut)
@@ -264,9 +391,11 @@ def household_update(
     if body.state is not None:
         st = (body.state or "").strip().upper()[:2]
         hh.state = st if st.isalpha() and len(st) == 2 else ""
+    if body.idle_minutes is not None:
+        hh.idle_minutes = _clamp_idle(body.idle_minutes)
     db.commit()
     db.refresh(hh)
-    return hh
+    return _household_out(hh)
 
 
 # ── Names dropdown ────────────────────────────────────────────────
@@ -374,7 +503,7 @@ def create_item(
     schedule = (
         [body.due_date]
         if body.item_type == "balance" or freq == "once"
-        else _repeat_dates(body.due_date, freq, months_ahead=3)
+        else _repeat_dates(body.due_date, freq, months_ahead=12)
     )
 
     first: BudgetItem | None = None
@@ -647,6 +776,37 @@ def onboarding_status(
     }
 
 
+@app.get("/api/runtime")
+def runtime_info(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    hh = get_household(db)
+    st = backup_status()
+    return {
+        "in_docker": running_in_docker(),
+        "idle_minutes": _idle_minutes(db),
+        "has_recovery_key": bool(getattr(hh, "recovery_key_hash", "") or ""),
+        **st,
+    }
+
+
+@app.get("/api/backup/status")
+def backup_status_api(user: User = Depends(current_user)):
+    return backup_status()
+
+
+@app.post("/api/backup/local")
+def backup_local_now(user: User = Depends(current_user)):
+    path = save_local_backup()
+    if not path:
+        raise HTTPException(status_code=404, detail="Nothing to save yet.")
+    st = backup_status()
+    return {
+        "ok": True,
+        "file": path.name,
+        "message": f"Saved a copy on this computer ({path.name}). Your live budget was not changed.",
+        **st,
+    }
+
+
 @app.get("/api/backup")
 def backup_download(user: User = Depends(current_user)):
     """Download the local SQLite database (budget data)."""
@@ -759,6 +919,7 @@ def calendar(
     year = year or today.year
     month = month or today.month
     hh = get_household(db)
+    ensure_recurring_through(db, hh.id, year, month, extra_months=2)
 
     start = date(year, month, 1)
     last = monthrange(year, month)[1]

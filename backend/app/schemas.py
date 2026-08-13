@@ -21,11 +21,18 @@ class LoginResponse(BaseModel):
     username: str
     role: str
     must_change_password: bool = False
+    idle_minutes: int = 30
 
 
 class PasswordChangeRequest(BaseModel):
     current_password: str = Field(min_length=1)
     new_password: str = Field(min_length=4, max_length=128)
+
+
+class RescueResetRequest(BaseModel):
+    rescue_code: str = Field(min_length=8, max_length=64)
+    new_password: str = Field(min_length=4, max_length=128)
+    username: Optional[str] = None
 
 
 class HouseholdOut(BaseModel):
@@ -38,6 +45,8 @@ class HouseholdOut(BaseModel):
     primary_age: Optional[int] = None
     partner_age: Optional[int] = None
     state: str = ""
+    idle_minutes: int = 30
+    has_recovery_key: bool = False
 
     class Config:
         from_attributes = True
@@ -51,6 +60,7 @@ class HouseholdUpdate(BaseModel):
     primary_age: Optional[int] = None
     partner_age: Optional[int] = None
     state: Optional[str] = None
+    idle_minutes: Optional[int] = None
 
 
 class ItemNameOut(BaseModel):
