@@ -415,9 +415,49 @@ h2 .help-icon,
 /* Snapshot hero */
 .snapshot-hero {
   display: grid;
-  grid-template-columns: 1.4fr repeat(4, 1fr);
+  grid-template-columns: 1.4fr repeat(5, 1fr);
   gap: 0.75rem;
   margin-bottom: 1.25rem;
+}
+.stat-value.snap-flow {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+.snap-flow-sep {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.chip-actual {
+  background: rgba(163, 113, 247, 0.18);
+  color: #d2a8ff;
+}
+
+/* Table fields (Recurring, Cards) — match dark theme, not browser white */
+table.data input,
+table.data select,
+table.data textarea {
+  background: var(--bg-dark-3);
+  border: 1px solid var(--border-hover);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  padding: 0.35rem 0.5rem;
+  outline: none;
+}
+table.data input.input-money {
+  font-family: var(--font-mono);
+  text-align: right;
+}
+table.data input:focus,
+table.data select:focus,
+table.data textarea:focus {
+  border-color: var(--brand);
+  background: var(--bg-dark);
+}
+table.data input::placeholder {
+  color: var(--text-muted);
 }
 .snap-net {
   background: linear-gradient(135deg, rgba(200, 16, 46, 0.16), rgba(13, 17, 23, 0.4));
@@ -468,6 +508,84 @@ h2 .help-icon,
   border-color: var(--brand-border);
   background: rgba(200, 16, 46, 0.08);
   color: var(--text-primary);
+}
+
+.focus-strip {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.75rem;
+  margin: 0 0 1.15rem;
+}
+@media (min-width: 1200px) {
+  .focus-strip { grid-template-columns: repeat(4, 1fr); }
+}
+.focus-card {
+  background: var(--bg-dark-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1rem;
+  min-height: 0;
+}
+.focus-card h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+.focus-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+}
+.focus-row:first-of-type { border-top: none; padding-top: 0; }
+.focus-row .focus-name {
+  color: var(--text-primary);
+  font-weight: 600;
+  min-width: 0;
+}
+.focus-row .focus-meta {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+.focus-row .focus-main {
+  min-width: 0;
+  flex: 1;
+}
+.focus-empty {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+.focus-bank-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+  margin-top: 0.45rem;
+}
+.focus-bank-form input {
+  width: 8.5rem;
+  min-height: 40px;
+}
+.focus-bank-form .btn { min-height: 40px; }
+
+.subs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.35rem 0 0.85rem;
+}
+.subs-chips .btn { min-height: 36px; font-size: 0.8rem; }
+.subs-table-wrap { margin-top: 0.5rem; }
+.subs-guess {
+  font-size: 0.75rem;
+  color: var(--text-muted);
 }
 
 /* Dashboard grid */
@@ -617,11 +735,11 @@ h2 .help-icon,
   color: #56d364;
   border-color: rgba(63, 185, 80, 0.28);
 }
-/* Confirmed actuals — green */
+/* Confirmed spend — purple, not green (green = money in) */
 .pill-actual {
-  background: rgba(63, 185, 80, 0.18);
-  color: #3fb950;
-  border-color: rgba(63, 185, 80, 0.4);
+  background: rgba(163, 113, 247, 0.16);
+  color: #d2a8ff;
+  border-color: rgba(163, 113, 247, 0.35);
 }
 /* Bank balance anchor */
 .pill-balance {
@@ -1127,6 +1245,7 @@ tr.import-dup td { background: rgba(210, 153, 34, 0.08); }
   .dash-top { grid-template-columns: 1fr; }
   .snapshot-hero { grid-template-columns: 1fr 1fr; }
   .empty-coach { grid-template-columns: 1fr; }
+  .focus-strip { grid-template-columns: 1fr; }
 }
 @media (max-width: 640px) {
   .snapshot-hero { grid-template-columns: 1fr; }
@@ -1161,9 +1280,12 @@ tr.import-dup td { background: rgba(210, 153, 34, 0.08); }
   }
   .cal-grid,
   .cal-weekdays {
-    min-width: 560px;
+    min-width: 0;
   }
-  .cal-cell { min-height: 104px; }
+  .cal-cell { min-height: 72px; padding: 0.3rem; }
+  .cal-pills { display: none; }
+  .legend { display: none; }
+  .focus-row { min-height: 44px; }
   .pill {
     font-size: 0.72rem;
     padding: 0.28rem 0.4rem;
@@ -1198,6 +1320,26 @@ tr.import-dup td { background: rgba(210, 153, 34, 0.08); }
   .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .login-card { width: min(440px, 100%); padding: 1.35rem 1.1rem; }
   input, select, textarea { min-height: 44px; font-size: 16px; }
+}
+
+/* Viewer role: look only. Server also blocks writes. */
+.viewer-only { display: none; }
+body.role-viewer .viewer-only { display: block; }
+body.role-viewer .viewer-only-flex { display: flex; }
+body.role-viewer .write-only { display: none !important; }
+body.role-viewer .day-actions,
+body.role-viewer .day-actions-col,
+body.role-viewer .goal-actions {
+  display: none !important;
+}
+.viewer-banner {
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-dark-2);
+  color: var(--text-secondary);
+  font-size: 0.88rem;
 }
 
 @media (max-width: 640px) {

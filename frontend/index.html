@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Household Money</title>
   <link rel="icon" type="image/png" href="/brand/assets/logo_icon.png" />
-  <link rel="stylesheet" href="/brand/base.css?v=1.6.0" />
-  <link rel="stylesheet" href="/static/css/app.css?v=1.6.0" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" defer></script>
-  <script src="/static/js/app.js?v=1.6.0" defer></script>
+  <link rel="stylesheet" href="/brand/base.css?v=1.10.11" />
+  <link rel="stylesheet" href="/static/css/app.css?v=1.10.11" />
+  <script src="/static/js/vendor/chart.umd.min.js?v=1.10.11" defer></script>
+  <script src="/static/js/app.js?v=1.10.11" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -131,14 +131,23 @@
         <button class="nav-btn active" data-view="dashboard" type="button">
           <span class="nav-icon">▦</span> Home
         </button>
-        <button class="nav-btn" data-view="input" type="button">
+        <button class="nav-btn write-only" data-view="input" type="button">
           <span class="nav-icon">＋</span> Money in / out
         </button>
-        <button class="nav-btn" data-view="paystub" type="button">
+        <button class="nav-btn" data-view="recurring" type="button">
+          <span class="nav-icon">∞</span> Recurring
+        </button>
+        <button class="nav-btn write-only" data-view="paystub" type="button">
           <span class="nav-icon">$</span> Pay stub
         </button>
         <button class="nav-btn" data-view="goals" type="button">
           <span class="nav-icon">◎</span> Goals
+        </button>
+        <button class="nav-btn" data-view="subs" type="button">
+          <span class="nav-icon">↻</span> Subscriptions
+        </button>
+        <button class="nav-btn" data-view="cards" type="button">
+          <span class="nav-icon">▭</span> Cards
         </button>
         <button class="nav-btn" data-view="debts" type="button">
           <span class="nav-icon">↓</span> Debt plan
@@ -146,7 +155,7 @@
         <button class="nav-btn" data-view="invest" type="button">
           <span class="nav-icon">↗</span> Investments
         </button>
-        <button class="nav-btn" data-view="import" type="button">
+        <button class="nav-btn write-only" data-view="import" type="button">
           <span class="nav-icon">⇪</span> Import
         </button>
         <button class="nav-btn" data-view="settings" type="button">
@@ -167,7 +176,7 @@
                 <h1 class="dash-name-wrap">
                   <span id="dash-heading" class="dash-name-text">My Household</span>
                   <input id="dash-name-input" class="dash-name-input" type="text" maxlength="120" hidden aria-label="Household name" />
-                  <button type="button" class="btn btn-ghost btn-sm dash-name-edit" id="dash-name-edit" title="Rename household">Rename</button>
+                  <button type="button" class="btn btn-ghost btn-sm dash-name-edit write-only" id="dash-name-edit" title="Rename household">Rename</button>
                   <button type="button" class="btn btn-primary btn-sm dash-name-save" id="dash-name-save" hidden>Save</button>
                   <button type="button" class="btn btn-ghost btn-sm dash-name-cancel" id="dash-name-cancel" hidden>Cancel</button>
                   <button type="button" class="help-icon" data-help="This is your household name on Home and in the top bar. Click Rename to change it (example: “Our Household” or “Family Budget”). Scroll down for the monthly calendar plan.">?</button>
@@ -181,18 +190,25 @@
               <div class="month-label" id="month-label">—</div>
               <button class="btn btn-ghost btn-sm" type="button" id="next-month">→</button>
               <button class="btn btn-outline btn-sm" type="button" id="today-month">Today</button>
+              <button class="btn btn-outline btn-sm write-only" type="button" id="btn-copy-month" title="Copy last month’s repeating bills and pay into this month">
+                Copy last month
+              </button>
               <button class="btn btn-primary btn-sm" type="button" id="btn-print-month" title="Print this month’s overview">
                 Print month
               </button>
-              <button type="button" class="help-icon" data-help="Creates a clean one-page overview of the month on screen (summary + list of items) and opens your browser’s print dialog. Choose your printer or Save as PDF. Uses the month currently shown on Home.">?</button>
+              <button type="button" class="help-icon" data-help="Copy last month brings repeating bills and pay into the month on screen (skips one-time items). Print month opens a clean one-page overview — choose your printer or Save as PDF.">?</button>
             </div>
           </div>
 
+          <div id="viewer-banner" class="viewer-banner viewer-only" role="status">
+            You’re signed in as <strong>Viewer</strong> (look only). Ask an adult to change bills, imports, or people.
+          </div>
           <div id="home-notes" class="home-notes" aria-live="polite"></div>
           <div id="onboarding-panel" class="onboarding-panel" style="display:none" aria-live="polite"></div>
           <div id="empty-coach" class="empty-coach" style="display:none"></div>
 
           <div class="snapshot-hero" id="snapshot-hero"></div>
+          <div id="focus-strip" class="focus-strip" aria-live="polite"></div>
 
           <div class="dash-top">
             <div>
@@ -265,7 +281,7 @@
                 </div>
               </div>
               <div class="chart-box">
-                <h3>Income vs expenses</h3>
+                <h3>Income vs paid</h3>
                 <div class="chart-canvas-wrap">
                   <canvas id="chart-income"></canvas>
                 </div>
@@ -309,7 +325,7 @@
             </div>
           </div>
 
-          <div class="form-panel">
+          <div class="form-panel write-only">
             <h2>New item</h2>
             <p class="lead">Pick a name from the list or add a custom one. Customs are remembered.</p>
             <form id="item-form">
@@ -356,6 +372,7 @@
                   <select id="item-freq">
                     <option value="once">One time only</option>
                     <option value="monthly" selected>Same day each month</option>
+                    <option value="yearly">Once a year (Prime, Apple yearly)</option>
                     <option value="biweekly">Every 2 weeks (pay)</option>
                   </select>
                   <div class="form-hint" id="item-freq-hint">Example: pick the 1st → rent shows on the 1st for the next few months.</div>
@@ -375,6 +392,12 @@
                 <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
                   <input type="checkbox" id="item-retain" checked style="width:auto" />
                   Remember this name in the dropdown
+                </label>
+              </div>
+              <div class="form-group">
+                <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
+                  <input type="checkbox" id="item-sub" style="width:auto" />
+                  This is a subscription (Apple, Netflix, software, gym…)
                 </label>
               </div>
               <button class="btn btn-primary" type="submit">Save item</button>
@@ -401,6 +424,65 @@
           </div>
         </section>
 
+        <!-- RECURRING -->
+        <section id="view-recurring" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Every month</span>
+              <h1>Recurring
+                <button type="button" class="help-icon" data-help="Mortgage, car, electric, water. Change THIS month when the bill is different (Florida water, lawn watering) without changing later months. Change usual amount when the rate went up for good.">?</button>
+              </h1>
+              <div class="sub">Update this month vs later months — water and electric can change</div>
+            </div>
+          </div>
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
+            <h2>Add a repeating bill</h2>
+            <form id="recurring-add-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="rec-add-name">Name</label>
+                  <input id="rec-add-name" type="text" required maxlength="120" placeholder="Water, electric, car…" />
+                </div>
+                <div class="form-group">
+                  <label for="rec-add-amount">Usual amount ($)</label>
+                  <input id="rec-add-amount" class="input-money" type="number" min="0.01" step="0.01" required />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="rec-add-freq">Repeats</label>
+                  <select id="rec-add-freq">
+                    <option value="monthly" selected>Every month</option>
+                    <option value="biweekly">Every 2 weeks</option>
+                    <option value="weekly">Every week</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="rec-add-day">Day of month (monthly)</label>
+                  <input id="rec-add-day" type="number" min="1" max="28" value="1" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="rec-add-start">First / next date (every 2 weeks)</label>
+                  <input id="rec-add-start" type="date" />
+                </div>
+                <div class="form-group">
+                  <label for="rec-add-type">Type</label>
+                  <select id="rec-add-type">
+                    <option value="bill" selected>Bill</option>
+                    <option value="estimate">Estimate (varies, like water)</option>
+                    <option value="paycheck">Paycheck / income</option>
+                  </select>
+                </div>
+              </div>
+              <button class="btn btn-primary" type="submit">Add to calendar</button>
+              <span id="rec-add-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
+          <div id="recurring-list"></div>
+        </section>
+
         <!-- PAY STUB -->
         <section id="view-paystub" class="view">
           <div class="page-head">
@@ -419,7 +501,7 @@
             <strong class="text-primary">Scanned photo PDFs</strong> may not extract well; typed/digital PDFs work best.
           </div>
 
-          <div class="form-panel" style="margin-bottom:1.5rem">
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
             <h2>1. Upload PDF</h2>
             <div class="import-zone" style="margin-top:0.75rem">
               <p class="text-primary" style="font-weight:600">Pay stub PDF</p>
@@ -432,7 +514,7 @@
             <span id="paystub-parse-msg" class="form-hint" style="margin-left:0.75rem"></span>
           </div>
 
-          <div class="form-panel" style="margin-bottom:1.5rem;max-width:800px">
+          <div class="form-panel write-only" style="margin-bottom:1.5rem;max-width:800px">
             <h2>2. Review &amp; fix
               <button type="button" class="help-icon" data-help="Always double-check net pay and pay date. Parsers guess from labels — every employer formats stubs differently.">?</button>
             </h2>
@@ -540,7 +622,7 @@
             Add buckets like 401k, IRA, brokerage, crypto, or a kids’ 529. Update the value when you open a statement.
             Gain/loss only shows if you enter what you put in (cost basis).
           </div>
-          <div class="form-panel" style="margin-bottom:1.5rem">
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
             <h2>Add account</h2>
             <form id="invest-form">
               <div class="form-row">
@@ -611,6 +693,56 @@
           </div>
         </section>
 
+        <!-- SUBSCRIPTIONS -->
+        <section id="view-subs" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Quiet charges</span>
+              <h1>Subscriptions
+                <button type="button" class="help-icon" data-help="Streaming, Apple (iCloud / App Store), gym, software. These hide on a card statement as Apple.com/bill. List them here to see the monthly total and what that is per year. Nothing connects to Apple or a bank.">?</button>
+              </h1>
+              <div class="sub">Apple, Netflix, gym, software — what they cost a year if they keep billing</div>
+            </div>
+          </div>
+          <div class="metrics-grid" id="subs-summary" style="margin-bottom:1.15rem;max-width:720px"></div>
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
+            <h2>Add a subscription</h2>
+            <p class="lead">Type the name or tap a common one. Monthly is usual; yearly is Prime / some Apple plans.</p>
+            <div id="subs-chips" class="subs-chips"></div>
+            <form id="subs-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="sub-name">Name</label>
+                  <input id="sub-name" type="text" required maxlength="120" placeholder="Apple, Netflix, iCloud+…" />
+                </div>
+                <div class="form-group">
+                  <label for="sub-amount">Amount ($)
+                    <button type="button" class="help-icon" data-help="What they charge each time. For a yearly plan, put the yearly price and pick Once a year.">?</button>
+                  </label>
+                  <input id="sub-amount" class="input-money" type="number" min="0.01" step="0.01" required placeholder="9.99" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="sub-date">Next bill date</label>
+                  <input id="sub-date" type="date" required />
+                </div>
+                <div class="form-group">
+                  <label for="sub-freq">Repeats</label>
+                  <select id="sub-freq">
+                    <option value="monthly" selected>Every month</option>
+                    <option value="yearly">Once a year</option>
+                    <option value="weekly">Every week</option>
+                  </select>
+                </div>
+              </div>
+              <button class="btn btn-primary" type="submit">Save subscription</button>
+              <span id="subs-form-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
+          <div id="subs-list"></div>
+        </section>
+
         <!-- GOALS -->
         <section id="view-goals" class="view">
           <div class="page-head">
@@ -622,7 +754,7 @@
               <div class="sub">House, vacation, emergency fund — track progress without guesswork</div>
             </div>
           </div>
-          <div class="form-panel" style="margin-bottom:1.5rem">
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
             <h2>Add a goal</h2>
             <p class="lead">Set a target amount and optional date. We’ll show how much to save per month.</p>
             <form id="goal-form">
@@ -672,6 +804,93 @@
           <div id="goals-list" class="goals-grid"></div>
         </section>
 
+        <!-- CARDS -->
+        <section id="view-cards" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Credit cards</span>
+              <h1>Card tracker
+                <button type="button" class="help-icon" data-help="Upload a credit-card PDF from the issuer (Chase card statement). We pull new balance, APR, minimum payment, and charges on this computer. Charges stay here — they do not flood the calendar. Min payment can be added as a monthly bill. Recurring merchants (Apple, Netflix…) are flagged so you can put them on Subscriptions / the calendar.">?</button>
+              </h1>
+              <div class="sub">Statement PDF → balance, APR, min pay, recurring charges · calendar stays bills-only</div>
+            </div>
+          </div>
+          <div class="metrics-grid" id="cards-summary" style="margin-bottom:1.15rem;max-width:720px"></div>
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
+            <h2>Upload a card statement</h2>
+            <p class="lead">Chase credit-card PDF from chase.com (not a photo). Checking statements still go under Import.</p>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="card-stmt-file">PDF file</label>
+                <input type="file" id="card-stmt-file" accept=".pdf,application/pdf" />
+              </div>
+            </div>
+            <button class="btn btn-outline" type="button" id="btn-card-preview">Read statement</button>
+            <span id="card-preview-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            <div id="card-preview-box" style="display:none;margin-top:1rem">
+              <div id="card-preview-stats" class="metrics-grid" style="margin-bottom:1rem"></div>
+              <p class="lead" id="card-preview-match" style="margin-bottom:0.85rem"></p>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="card-edit-balance">New balance ($)</label>
+                  <input id="card-edit-balance" class="input-money" type="number" min="0" step="0.01" />
+                </div>
+                <div class="form-group">
+                  <label for="card-edit-apr">APR (%)
+                    <button type="button" class="help-icon" data-help="Purchase APR from the statement, or type it if the PDF left this blank. Used by Debt plan for interest.">?</button>
+                  </label>
+                  <input id="card-edit-apr" class="input-money" type="number" min="0" max="80" step="0.01" placeholder="24.99" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="card-edit-stmt-min">Statement minimum ($)
+                    <button type="button" class="help-icon" data-help="The smallest amount the card requires this month. Shown so you can compare to what you actually pay.">?</button>
+                  </label>
+                  <input id="card-edit-stmt-min" class="input-money" type="number" min="0" step="0.01" />
+                  <div class="form-hint" id="card-stmt-min-hint">From the PDF if we found it</div>
+                </div>
+                <div class="form-group">
+                  <label for="card-edit-pay">What I auto-pay ($)
+                    <button type="button" class="help-icon" data-help="The amount that actually leaves checking each month. If you set autopay higher than the minimum, put that higher number here. Debt plan and the calendar bill use this.">?</button>
+                  </label>
+                  <input id="card-edit-pay" class="input-money" type="number" min="0" step="0.01" />
+                  <div class="form-hint">Can be higher than the statement minimum</div>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="card-edit-due">Payment due date</label>
+                  <input id="card-edit-due" type="date" />
+                </div>
+              </div>
+              <label style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem">
+                <input type="checkbox" id="card-put-min" checked style="width:auto" />
+                Put this auto-pay amount on the calendar as a monthly bill
+              </label>
+              <button class="btn btn-primary" type="button" id="btn-card-apply">Save to card tracker</button>
+              <span id="card-apply-msg" class="form-hint" style="margin-left:0.75rem"></span>
+              <h3 style="margin:1.25rem 0 0.5rem">Charges on this statement</h3>
+              <p class="text-muted" style="font-size:0.85rem">These do not go on Home. Recurring ones are listed below.</p>
+              <div class="table-wrap" style="margin-top:0.5rem">
+                <table class="data" id="card-preview-txns">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Description</th>
+                      <th class="num">Amount</th>
+                      <th>Kind</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          <div id="cards-list"></div>
+          <div id="cards-recurring" style="margin-top:1.5rem"></div>
+        </section>
+
         <!-- DEBTS -->
         <section id="view-debts" class="view">
           <div class="page-head">
@@ -684,7 +903,7 @@
             </div>
           </div>
 
-          <div class="form-panel" style="margin-bottom:1.5rem">
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
             <h2>Add a debt</h2>
             <p class="lead">Credit cards, car loan, personal loan — balance, APR, and minimum payment.</p>
             <form id="debt-form">
@@ -759,6 +978,7 @@
               </div>
             </div>
             <button class="btn btn-primary" type="button" id="btn-run-plan">Calculate plan</button>
+            <button class="btn btn-outline write-only" type="button" id="btn-debt-cal">Put this month’s extra on the calendar</button>
             <span id="plan-msg" class="form-hint" style="margin-left:0.75rem"></span>
             <div id="plan-results" style="margin-top:1.25rem"></div>
           </div>
@@ -769,21 +989,22 @@
           <div class="page-head">
             <div>
               <span class="section-label">Actuals</span>
-              <h1>Import bank statement
-                <button type="button" class="help-icon" data-help="Upload a CSV from online banking, or a Chase monthly statement PDF (text PDF from Chase.com). Everything stays on this computer — always Preview first, then import.">?</button>
+              <h1>Import statements
+                <button type="button" class="help-icon" data-help="Checking and credit-card statements are separate files. Preview each one — they stack in one list, they do not replace each other. Then Import selected once. Always Preview first.">?</button>
               </h1>
-              <div class="sub">CSV for major banks · Chase also accepts PDF monthly statements</div>
+              <div class="sub">Checking + credit card · Preview each file · they add to the same list</div>
               <div class="form-hint" id="import-version-hint" style="margin-top:0.35rem"></div>
             </div>
           </div>
-          <div class="form-panel" style="max-width:960px">
+          <div class="form-panel write-only" style="max-width:960px">
             <div class="form-group" style="max-width:420px">
               <label for="import-bank">Bank
                 <button type="button" class="help-icon" data-help="Auto-detect works for most files. For Chase PDF statements, pick Chase or leave Auto. Always Preview and check In/Out before importing.">?</button>
               </label>
               <select id="import-bank">
                 <option value="auto" selected>Auto-detect</option>
-                <option value="chase">Chase (CSV or PDF statement)</option>
+                <option value="chase">Chase checking (CSV or PDF)</option>
+                <option value="chase_credit">Chase credit card (CSV or PDF)</option>
                 <option value="bank_of_america">Bank of America (CSV)</option>
                 <option value="wells_fargo">Wells Fargo (CSV)</option>
                 <option value="citi">Citi (CSV)</option>
@@ -796,14 +1017,16 @@
                 <button type="button" class="help-icon" data-help="Chase monthly statement: download the PDF from online banking (not a phone photo). Other banks: prefer CSV export when available. Scanned image PDFs usually will not work.">?</button>
               </p>
               <p class="text-secondary" style="font-size:0.9rem;margin-top:0.35rem">
-                Chase PDF statements and multi-bank CSVs. Preview before you import.
+                You can pick checking and a credit-card PDF together, or Preview one, then the other.
+                New previews <strong class="text-primary">add</strong> to the list — they do not wipe the first file.
               </p>
-              <input type="file" id="statement-file" accept=".csv,text/csv,.txt,.pdf,application/pdf" />
+              <input type="file" id="statement-file" accept=".csv,text/csv,.txt,.pdf,application/pdf" multiple />
             </div>
             <div style="display:flex;gap:0.65rem;flex-wrap:wrap;align-items:center;margin-bottom:1rem">
-              <button class="btn btn-outline" type="button" id="btn-preview-import">Preview</button>
+              <button class="btn btn-outline" type="button" id="btn-preview-import">Preview / add file</button>
               <button class="btn btn-primary" type="button" id="btn-commit-import">Import selected</button>
-              <button type="button" class="help-icon" data-help="Preview loads the statement. Check only the rows you want, set a category bucket (Income, Food, Electric, Water…), then Import selected. Unchecked rows are ignored.">?</button>
+              <button class="btn btn-ghost btn-sm" type="button" id="btn-import-clear">Clear list</button>
+              <button type="button" class="help-icon" data-help="Preview checking, then Preview the card (or select both files at once). They stack. Tick the rows you want, then Import selected. Clearing the list only clears the preview, not the calendar.">?</button>
               <span id="import-msg" class="form-hint"></span>
             </div>
             <div id="import-bank-badge" class="text-muted" style="font-size:0.85rem;margin-bottom:0.5rem"></div>
@@ -843,6 +1066,7 @@
                   <tr>
                     <th style="width:2.5rem">Use</th>
                     <th>Date</th>
+                    <th>From</th>
                     <th>Description</th>
                     <th class="num">Amount</th>
                     <th>Flow</th>
@@ -868,7 +1092,10 @@
             </div>
           </div>
           <div class="settings-grid">
-            <div class="form-panel">
+            <p class="viewer-banner viewer-only" role="status">
+              You’re signed in as Viewer. You can change your own password. Household settings, people, backups, and updates are for an adult login.
+            </p>
+            <div class="form-panel write-only">
               <h2>Balance & name</h2>
               <form id="settings-form" style="margin-top:1rem">
                 <div class="form-group">
@@ -1013,7 +1240,7 @@
               </h2>
               <p class="lead">Create a login for a spouse, partner, or helper. Pick a permission level.</p>
               <div id="members-list" style="margin-bottom:1rem"></div>
-              <form id="member-form">
+              <form id="member-form" class="write-only">
                 <div class="form-row">
                   <div class="form-group">
                     <label for="mem-user">Username</label>
@@ -1060,11 +1287,11 @@
               <p id="update-msg" class="update-status" style="margin-top:0.5rem"></p>
               <div class="backup-actions" style="margin-top:0.85rem">
                 <button class="btn btn-outline" type="button" id="btn-update-check">Check for a newer version</button>
-                <button class="btn btn-primary" type="button" id="btn-update-apply" disabled>Update now</button>
+                <button class="btn btn-primary write-only" type="button" id="btn-update-apply" disabled>Update now</button>
               </div>
               <p class="form-hint" style="margin-top:0.75rem">Need internet on this computer. If Update now is gray, you already have the latest — or tap Check first.</p>
             </div>
-            <div class="form-panel">
+            <div class="form-panel write-only">
               <h2>If you forget your password
                 <button type="button" class="help-icon" data-help="A rescue code lets you set a new password without erasing bills. Write it on paper. Making a new code turns the old one off.">?</button>
               </h2>
@@ -1076,7 +1303,7 @@
               <p id="rescue-settings-code" class="mono text-primary" style="margin-top:0.75rem;font-size:1.05rem;letter-spacing:0.05em"></p>
               <p id="rescue-settings-msg" class="form-hint" style="margin-top:0.5rem"></p>
             </div>
-            <div class="form-panel">
+            <div class="form-panel write-only">
               <h2>Backup &amp; restore
                 <button type="button" class="help-icon" data-help="The app also saves a quiet copy on this computer each month (data/backups). You can save one now, or download a file to a USB stick. Restore replaces the current budget.">?</button>
               </h2>
@@ -1150,6 +1377,7 @@
                   <select id="edit-item-freq">
                     <option value="once">One time only</option>
                     <option value="monthly">Same day each month</option>
+                    <option value="yearly">Once a year</option>
                     <option value="biweekly">Every 2 weeks (pay)</option>
                     <option value="weekly">Weekly</option>
                   </select>
@@ -1163,10 +1391,27 @@
                 <label for="edit-item-category">Category</label>
                 <input id="edit-item-category" type="text" maxlength="64" />
               </div>
+              <div class="form-group">
+                <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
+                  <input type="checkbox" id="edit-item-sub" style="width:auto" />
+                  This is a subscription
+                </label>
+              </div>
               <div class="form-group" id="edit-item-paid-row">
                 <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
                   <input type="checkbox" id="edit-item-paid" style="width:auto" />
                   Mark as paid (counts on green “act” balance for bills)
+                </label>
+              </div>
+              <div class="form-group" id="edit-item-scope-row" hidden>
+                <span class="form-hint" style="display:block;margin-bottom:0.4rem">This item repeats. What should change?</span>
+                <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
+                  <input type="radio" name="edit-item-scope" value="this" checked style="width:auto" />
+                  This date only (later months stay as they are)
+                </label>
+                <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary);margin-top:0.35rem">
+                  <input type="radio" name="edit-item-scope" value="future" style="width:auto" />
+                  This date and later months
                 </label>
               </div>
               <div class="modal-actions">

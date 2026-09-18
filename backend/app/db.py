@@ -94,6 +94,28 @@ def migrate_sqlite() -> None:
                         "VARCHAR(255) NOT NULL DEFAULT ''"
                     )
                 )
+        if "budget_items" in insp.get_table_names():
+            icols = {c["name"] for c in insp.get_columns("budget_items")}
+            if "repeat_until" not in icols:
+                conn.execute(text("ALTER TABLE budget_items ADD COLUMN repeat_until DATE"))
+            if "is_subscription" not in icols:
+                conn.execute(text("ALTER TABLE budget_items ADD COLUMN is_subscription BOOLEAN"))
+        if "debts" in insp.get_table_names():
+            dcols = {c["name"] for c in insp.get_columns("debts")}
+            if "last4" not in dcols:
+                conn.execute(text("ALTER TABLE debts ADD COLUMN last4 VARCHAR(8) NOT NULL DEFAULT ''"))
+            if "due_date" not in dcols:
+                conn.execute(text("ALTER TABLE debts ADD COLUMN due_date DATE"))
+            if "statement_date" not in dcols:
+                conn.execute(text("ALTER TABLE debts ADD COLUMN statement_date DATE"))
+            if "last_interest" not in dcols:
+                conn.execute(
+                    text("ALTER TABLE debts ADD COLUMN last_interest FLOAT NOT NULL DEFAULT 0")
+                )
+            if "kind" not in dcols:
+                conn.execute(
+                    text("ALTER TABLE debts ADD COLUMN kind VARCHAR(16) NOT NULL DEFAULT 'card'")
+                )
 
 
 def get_db():

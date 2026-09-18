@@ -20,7 +20,8 @@ from typing import Optional
 
 BANK_PRESETS = {
     "auto": "Auto-detect",
-    "chase": "Chase (CSV or PDF statement)",
+    "chase": "Chase checking (CSV or PDF)",
+    "chase_credit": "Chase credit card (CSV or PDF)",
     "bank_of_america": "Bank of America (CSV)",
     "wells_fargo": "Wells Fargo (CSV)",
     "citi": "Citi (CSV)",
@@ -53,6 +54,8 @@ def parse_bank_csv(
         return [], bank, "File is empty"
 
     bank_key = (bank or "auto").lower().strip()
+    if bank_key == "chase_credit":
+        bank_key = "chase"
     if bank_key not in BANK_PRESETS:
         bank_key = "auto"
 

@@ -21,6 +21,11 @@
     importCategories: [],
     importBankLabel: "Import",
     importDebts: [], // { key, name, apr, balance, min_payment }
+    subs: null,
+    cardPreview: null,
+    cardRecurring: [],
+    cardRecurringQ: "",
+    cardRecurringKind: "active",
   };
 
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -111,6 +116,38 @@
     });
   }
 
+  function isoDate(d = new Date()) {
+    const dt = d instanceof Date ? d : new Date(d);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, "0");
+    const day = String(dt.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
+  function daysBetween(fromIso, toIso) {
+    const a = new Date(`${fromIso}T12:00:00`);
+    const b = new Date(`${toIso}T12:00:00`);
+    return Math.round((b - a) / 86400000);
+  }
+
+  function isRecurringItem(it) {
+    return !!(it && it.frequency && it.frequency !== "once" && it.item_type !== "balance");
+  }
+
+  function editScopeValue() {
+    const picked = document.querySelector('input[name="edit-item-scope"]:checked');
+    return (picked && picked.value) || "this";
+  }
+
+  async function confirmDeleteItem(item) {
+    if (!isRecurringItem(item)) {
+      return confirm("Delete this item?") ? "this" : null;
+    }
+    if (confirm("Delete ONLY this date?\nLater months stay on the calendar.")) return "this";
+    if (confirm("Delete this date AND later months?\nThat stops the repeat.")) return "future";
+    return null;
+  }
+
   async function api(path, options = {}) {
     const headers = { ...(options.headers || {}) };
     if (state.token) headers.Authorization = `Bearer ${state.token}`;
@@ -187,6 +224,24 @@
         viewer: "Viewer",
       }[role] || role
     );
+  }
+
+  function isViewer() {
+    return ((state.user && state.user.role) || "").toLowerCase() === "viewer";
+  }
+
+  const VIEWER_WRITE_VIEWS = new Set(["input", "paystub", "import"]);
+
+  function applyViewerMode() {
+    const viewer = isViewer();
+    document.body.classList.toggle("role-viewer", viewer);
+    if (viewer) {
+      const active = $(".nav-btn.active");
+      const view = active && active.dataset.view;
+      if (view && VIEWER_WRITE_VIEWS.has(view)) {
+        setView("dashboard");
+      }
+    }
   }
 
   function clearIdleTimer() {
@@ -277,6 +332,7 @@
     state.token = "";
     state.user = null;
     localStorage.removeItem("budget_token");
+    document.body.classList.remove("role-viewer");
     showPasswordGate(false);
     showApp(false);
   }
@@ -286,6 +342,7 @@
     state.user = data;
     if (data.token) localStorage.setItem("budget_token", data.token);
     $("#user-badge").textContent = `${data.display_name || data.username} · ${roleLabel(data.role)}`;
+    applyViewerMode();
     if (data.idle_minutes) applyIdleMinutes(data.idle_minutes);
     state.lastActivity = Date.now();
     armIdleTimer();
@@ -344,8 +401,12 @@
     $$(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${name}`));
     if (name === "dashboard") refreshDashboard();
     if (name === "input") refreshInput();
+    if (name === "recurring") refreshRecurring();
+    if (name === "paystub") refreshPaystub();
     if (name === "import") refreshImportHint();
+    if (name === "subs") refreshSubs();
     if (name === "goals") refreshGoals();
+    if (name === "cards") refreshCards();
     if (name === "debts") refreshDebts();
     if (name === "invest") refreshInvestments();
     if (name === "settings") refreshSettings();
@@ -372,13 +433,14 @@
   async function refreshDashboard() {
     $("#month-label").textContent = monthName(state.year, state.month);
     const q = `year=${state.year}&month=${state.month}`;
-    const [cal, metrics, upcoming, hh, snap, onboarding] = await Promise.all([
+    const [cal, metrics, upcoming, hh, snap, onboarding, subs] = await Promise.all([
       api(`/api/calendar?${q}`),
       api(`/api/metrics?${q}`),
       api("/api/upcoming"),
       api("/api/household"),
       api("/api/snapshot"),
       api("/api/onboarding").catch(() => null),
+      api("/api/subscriptions").catch(() => null),
     ]);
     state.calendar = cal;
     state.metrics = metrics;
@@ -395,7 +457,8 @@
     }
     renderOnboarding(onboarding, hh);
     renderEmptyCoach(onboarding, cal, metrics);
-    renderSnapshot(snap);
+    renderSnapshot(snap, metrics);
+    renderFocusStrip(cal, upcoming.items || [], snap, subs);
     renderStats(metrics, cal);
     renderThresholdBanner(cal);
     await renderHomeNotes();
@@ -411,6 +474,11 @@
   function renderOnboarding(ob, hh) {
     const panel = $("#onboarding-panel");
     if (!panel) return;
+    if (isViewer()) {
+      panel.style.display = "none";
+      panel.innerHTML = "";
+      return;
+    }
     if (!ob || ob.onboarding_done || (hh && hh.onboarding_done)) {
       panel.style.display = "none";
       panel.innerHTML = "";
@@ -493,6 +561,11 @@
     if (!el) return;
     const itemCount = ob ? ob.item_count : 0;
     const hasMonthItems = (cal?.days || []).some((d) => (d.items || []).length);
+    if (isViewer()) {
+      el.style.display = "none";
+      el.innerHTML = "";
+      return;
+    }
     // Show coaching when brand new or this month is empty
     if (itemCount > 0 && hasMonthItems) {
       el.style.display = "none";
@@ -793,12 +866,14 @@
     }
   }
 
-  function renderSnapshot(s) {
+  function renderSnapshot(s, m) {
     const el = $("#snapshot-hero");
     if (!el) return;
     const nwCls = s.net_worth >= 0 ? "positive" : "negative";
+    const spent = m ? Number(m.month_expenses || 0) : 0;
+    const got = m ? Number(m.month_income || 0) : 0;
     const members = (s.members || [])
-      .map((m) => `<span>${escapeHtml(m.display_name)}</span>`)
+      .map((mm) => `<span>${escapeHtml(mm.display_name)}</span>`)
       .join("");
     el.innerHTML = `
       <div class="snap-net">
@@ -806,6 +881,11 @@
         <div class="stat-value ${nwCls}">${money(s.net_worth)}</div>
         <div class="stat-hint">Cash + investments − debts</div>
         <div class="snap-members">${members || "<span>Household</span>"}</div>
+      </div>
+      <div class="stat">
+        <div class="stat-label">This month ${helpBtn("Quick look at the month on the calendar: money going out / money coming in. Bank-balance snapshots are not counted as spending.")}</div>
+        <div class="stat-value snap-flow"><span class="negative">${money(spent)}</span><span class="snap-flow-sep"> / </span><span class="positive">${money(got)}</span></div>
+        <div class="stat-hint">Spent / income</div>
       </div>
       <div class="stat">
         <div class="stat-label">Cash ${helpBtn("Latest bank balance you entered, or starting cash from Household settings if you have not logged a bank balance yet.")}</div>
@@ -827,6 +907,189 @@
         <div class="stat-value" style="color:var(--brand-light)">${money(s.goals_saved)}</div>
         <div class="stat-hint">of ${money(s.goals_target)} target · ${s.goal_count} goal${s.goal_count === 1 ? "" : "s"}</div>
       </div>`;
+  }
+
+  function renderFocusStrip(cal, upcoming, snap, subs) {
+    if (subs) state.subs = subs;
+    subs = subs || state.subs;
+    const el = $("#focus-strip");
+    if (!el) return;
+    const today = isoDate();
+    const dueSoon = (upcoming || [])
+      .filter((it) => {
+        const d = daysBetween(today, it.due_date);
+        return d >= 0 && d <= 7 && it.item_type === "bill" && !it.is_paid;
+      })
+      .slice(0, 5);
+    const paydays = (upcoming || [])
+      .filter((it) => {
+        const d = daysBetween(today, it.due_date);
+        return d >= 0 && d <= 14 && it.item_type === "paycheck";
+      })
+      .slice(0, 4);
+    const lowDays = (cal.days || [])
+      .filter((d) => d.warn_actual || d.warn_est)
+      .slice(0, 5);
+    const asOf = snap && snap.cash_as_of;
+    const staleDays = asOf ? daysBetween(asOf, today) : null;
+    const stale = !asOf || staleDays >= 7;
+    const skipped = localStorage.getItem("focus_bank_skip") === today;
+    const viewer = isViewer();
+
+    const dueHtml = dueSoon.length
+      ? dueSoon
+          .map((it) => {
+            const d = daysBetween(today, it.due_date);
+            const when = d === 0 ? "Today" : d === 1 ? "Tomorrow" : it.due_date.slice(5);
+            const btn = viewer
+              ? ""
+              : `<button type="button" class="btn btn-primary btn-sm" data-focus-paid="${it.id}">Paid</button>`;
+            return `<div class="focus-row">
+              <div class="focus-main">
+                <div class="focus-name">${escapeHtml(it.name)}</div>
+                <div class="focus-meta">${when} · ${money(it.amount)}</div>
+              </div>
+              ${btn}
+            </div>`;
+          })
+          .join("")
+      : `<p class="focus-empty">No unpaid bills in the next 7 days.</p>`;
+
+    const payHtml = paydays.length
+      ? paydays
+          .map((it) => {
+            const d = daysBetween(today, it.due_date);
+            const when = d === 0 ? "Today" : d === 1 ? "Tomorrow" : it.due_date.slice(5);
+            const btn =
+              viewer || it.is_paid
+                ? it.is_paid
+                  ? `<span class="chip chip-success">in</span>`
+                  : ""
+                : `<button type="button" class="btn btn-outline btn-sm" data-focus-paid="${it.id}">It hit</button>`;
+            return `<div class="focus-row">
+              <div class="focus-main">
+                <div class="focus-name">${escapeHtml(it.name)}</div>
+                <div class="focus-meta">${when} · ${money(it.amount)}</div>
+              </div>
+              ${btn}
+            </div>`;
+          })
+          .join("")
+      : `<p class="focus-empty">No paydays in the next 2 weeks.</p>`;
+
+    let bankBody;
+    if (asOf) {
+      bankBody = `<p class="focus-empty" style="margin-bottom:0.35rem">Last logged ${asOf}${
+        staleDays != null ? ` · ${staleDays} day${staleDays === 1 ? "" : "s"} ago` : ""
+      } · ${money(snap.cash)}</p>`;
+    } else {
+      bankBody = `<p class="focus-empty" style="margin-bottom:0.35rem">No bank balance logged yet. Starting cash is ${money(
+        snap.cash || 0
+      )}.</p>`;
+    }
+    if (stale && !viewer && !skipped) {
+      bankBody += `
+        <p class="focus-empty">What does checking show today?</p>
+        <form class="focus-bank-form" id="focus-bank-form">
+          <input id="focus-bank-amount" class="input-money" type="number" min="0.01" step="0.01" required placeholder="0.00" />
+          <button class="btn btn-primary btn-sm" type="submit">Save</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="focus-bank-skip">Not now</button>
+        </form>`;
+    }
+
+    const lowHtml = lowDays.length
+      ? lowDays
+          .map((d) => {
+            const kind = d.warn_actual ? "act" : "est";
+            const amt = d.warn_actual ? d.running_balance_actual : d.running_balance_est;
+            return `<div class="focus-row">
+              <div class="focus-main">
+                <div class="focus-name">${d.date}</div>
+                <div class="focus-meta">Low ${kind} · ${money(amt)}</div>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" data-focus-day="${d.date}">Open</button>
+            </div>`;
+          })
+          .join("")
+      : `<p class="focus-empty">${
+          cal.safety_threshold > 0 ? "No low-cash days this month." : "Set a safety amount under Household to flag tight days."
+        }</p>`;
+
+    const subCount = subs && subs.count ? subs.count : 0;
+    const subHtml = subCount
+      ? `<p class="focus-empty" style="margin:0 0 0.35rem"><strong class="text-primary">${money(subs.monthly_total)}</strong>/mo</p>
+         <p class="focus-empty" style="margin:0 0 0.55rem">${money(subs.yearly_total)} a year · ${subCount} service${subCount === 1 ? "" : "s"}</p>
+         <button type="button" class="btn btn-outline btn-sm" data-go-subs>Open list</button>`
+      : `<p class="focus-empty">Add Apple, Netflix, gym… so they stop hiding on the card.</p>
+         <button type="button" class="btn btn-outline btn-sm" data-go-subs>Add subscriptions</button>`;
+
+    el.innerHTML = `
+      <div class="focus-card">
+        <h3>Due this week</h3>
+        ${dueHtml}
+      </div>
+      <div class="focus-card">
+        <h3>Paydays</h3>
+        ${payHtml}
+      </div>
+      <div class="focus-card">
+        <h3>Bank balance</h3>
+        ${bankBody}
+        ${lowDays.length ? `<div style="margin-top:0.65rem">${lowHtml}</div>` : `<div style="margin-top:0.35rem">${lowHtml}</div>`}
+      </div>
+      <div class="focus-card">
+        <h3>Subscriptions</h3>
+        ${subHtml}
+      </div>`;
+
+    el.querySelectorAll("[data-focus-paid]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          await api(`/api/items/${btn.dataset.focusPaid}/toggle-paid`, { method: "POST" });
+          await refreshDashboard();
+        } catch (ex) {
+          alert(ex.message || "Could not update");
+        }
+      });
+    });
+    el.querySelectorAll("[data-focus-day]").forEach((btn) => {
+      btn.addEventListener("click", () => openDayExpand(btn.dataset.focusDay, true));
+    });
+    el.querySelectorAll("[data-go-subs]").forEach((btn) => {
+      btn.addEventListener("click", () => setView("subs"));
+    });
+    const skip = $("#focus-bank-skip");
+    if (skip) {
+      skip.addEventListener("click", () => {
+        localStorage.setItem("focus_bank_skip", today);
+        renderFocusStrip(cal, upcoming, snap);
+      });
+    }
+    const form = $("#focus-bank-form");
+    if (form) {
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const amt = parseFloat($("#focus-bank-amount").value);
+        if (!amt || amt <= 0) return;
+        try {
+          await api("/api/items", {
+            method: "POST",
+            json: {
+              name: "Bank balance",
+              item_type: "balance",
+              amount: amt,
+              due_date: today,
+              frequency: "once",
+              retain_name: true,
+            },
+          });
+          localStorage.removeItem("focus_bank_skip");
+          await refreshDashboard();
+        } catch (ex) {
+          alert(ex.message || "Could not save bank balance");
+        }
+      });
+    }
   }
 
   function renderStats(m, cal) {
@@ -916,7 +1179,7 @@
             return `<div class="pill pill-balance" title="Bank balance ${money(it.amount)}">= ${Math.round(it.amount)} bal</div>`;
           }
           const sign = it.is_income ? "+" : "−";
-          return `<div class="pill pill-${it.item_type}" title="${escapeHtml(it.name)} ${money(it.amount)}">${sign}${Math.round(it.amount)} ${escapeHtml(it.name)}</div>`;
+          return `<div class="pill ${pillClass(it)}" title="${escapeHtml(it.name)} ${money(it.amount)}">${sign}${Math.round(it.amount)} ${escapeHtml(it.name)}</div>`;
         })
         .join("");
       const more =
@@ -1064,19 +1327,27 @@
               ? `<span class="chip chip-success" style="margin-left:0.35rem">paid</span>`
               : "";
           const paidBtn =
-            it.item_type === "bill"
+            !isViewer() && it.item_type === "bill"
               ? `<button type="button" class="btn btn-ghost btn-sm" data-toggle-paid="${it.id}" title="Mark paid or unpaid">${it.is_paid ? "Unpaid" : "Paid"}</button>`
               : "";
-          return `<tr class="${it.is_paid && it.item_type === "bill" ? "row-paid" : ""}">
-            <td>${escapeHtml(it.name)}${paidChip}</td>
-            <td><span class="chip chip-${typeChip(it.item_type)}">${it.item_type}</span></td>
-            ${amountCell}
-            <td class="text-muted">${escapeHtml(it.notes || "")}</td>
-            <td class="day-actions">
+          const monthlyBtn =
+            !isViewer() && it.item_type === "actual" && !it.is_income
+              ? `<button type="button" class="btn btn-outline btn-sm" data-to-monthly="${it.id}">Make monthly bill</button>`
+              : "";
+          const actions = isViewer()
+            ? ""
+            : `<td class="day-actions">
               ${paidBtn}
+              ${monthlyBtn}
               <button type="button" class="btn btn-ghost btn-sm" data-edit-item="${it.id}">Edit</button>
               <button type="button" class="btn btn-ghost btn-sm text-danger" data-del-item="${it.id}">Delete</button>
-            </td>
+            </td>`;
+          return `<tr class="${it.is_paid && it.item_type === "bill" ? "row-paid" : ""}">
+            <td>${escapeHtml(it.name)}${paidChip}</td>
+            <td><span class="chip chip-${typeChip(it)}">${it.item_type}</span></td>
+            ${amountCell}
+            <td class="text-muted">${escapeHtml(it.notes || "")}</td>
+            ${actions}
           </tr>`;
         })
         .join("");
@@ -1102,12 +1373,30 @@
           if (item) openEditItemModal(item);
         });
       });
+      tbody.querySelectorAll("[data-to-monthly]").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          try {
+            const data = await api(`/api/items/${btn.dataset.toMonthly}/to-monthly-bill`, {
+              method: "POST",
+            });
+            alert(data.message || "Added as a monthly bill.");
+            await refreshDashboard();
+            await refreshRecurring().catch(() => {});
+          } catch (ex) {
+            alert(ex.message || "Could not add monthly bill");
+          }
+        });
+      });
       tbody.querySelectorAll("[data-del-item]").forEach((btn) => {
         btn.addEventListener("click", async (e) => {
           e.stopPropagation();
-          if (!confirm("Delete this item?")) return;
+          const id = Number(btn.dataset.delItem);
+          const item = day.items.find((x) => x.id === id);
+          const scope = await confirmDeleteItem(item || { frequency: "once" });
+          if (!scope) return;
           try {
-            await api(`/api/items/${btn.dataset.delItem}`, { method: "DELETE" });
+            await api(`/api/items/${id}?scope=${encodeURIComponent(scope)}`, { method: "DELETE" });
             await refreshDashboard();
             await refreshInput().catch(() => {});
           } catch (ex) {
@@ -1142,6 +1431,8 @@
     $("#edit-item-category").value = item.category || "";
     const paid = $("#edit-item-paid");
     if (paid) paid.checked = !!item.is_paid;
+    const subBox = $("#edit-item-sub");
+    if (subBox) subBox.checked = item.is_subscription === true;
     const paidRow = $("#edit-item-paid-row");
     if (paidRow) {
       paidRow.style.display =
@@ -1149,6 +1440,13 @@
     }
     const msg = $("#edit-item-msg");
     if (msg) msg.textContent = "";
+    const scopeRow = $("#edit-item-scope-row");
+    if (scopeRow) {
+      const repeating = isRecurringItem(item);
+      scopeRow.hidden = !repeating;
+      const thisRadio = document.querySelector('input[name="edit-item-scope"][value="this"]');
+      if (thisRadio) thisRadio.checked = true;
+    }
     modal.hidden = false;
   }
 
@@ -1312,11 +1610,11 @@
       state.charts.income = new Chart(incCtx, {
         type: "bar",
         data: {
-          labels: ["Income", "Bills", "Estimates", "Actuals"],
+          labels: ["Income", "Paid", "Still due"],
           datasets: [
             {
-              data: [m.month_income, m.month_bills, m.month_estimates, m.month_actuals],
-              backgroundColor: ["#3fb950", "#58a6ff", "#d29922", "#a371f7"],
+              data: [m.month_income, m.month_paid, m.month_still_due],
+              backgroundColor: ["#3fb950", "#a371f7", "#d29922"],
               borderRadius: 6,
             },
           ],
@@ -1363,13 +1661,13 @@
             ? ` <span class="chip chip-success">paid</span>`
             : "";
         const paidBtn =
-          it.item_type === "bill"
+          !isViewer() && it.item_type === "bill"
             ? `<button type="button" class="btn btn-ghost btn-sm" data-up-paid="${it.id}">${it.is_paid ? "Undo" : "Paid"}</button>`
             : "";
         return `<tr>
           <td>${it.due_date}</td>
           <td>${escapeHtml(it.name)}${paid}</td>
-          <td><span class="chip chip-${typeChip(it.item_type)}">${it.item_type}</span></td>
+          <td><span class="chip chip-${typeChip(it)}">${it.item_type}</span></td>
           <td class="num ${cls}">${sign}${money(it.amount)}</td>
           <td>${paidBtn}</td>
         </tr>`;
@@ -1389,12 +1687,271 @@
     });
   }
 
-  function typeChip(t) {
-    if (t === "paycheck" || t === "actual") return "success";
+  function typeChip(it) {
+    const t = typeof it === "string" ? it : (it && it.item_type) || "";
+    const income = t === "paycheck" || (typeof it === "object" && it && it.is_income);
+    if (t === "paycheck" || (t === "actual" && income)) return "success";
+    if (t === "actual") return "actual";
     if (t === "estimate") return "warning";
     if (t === "balance") return "brand";
     if (t === "bill") return "info";
     return "brand";
+  }
+
+  function pillClass(it) {
+    if (it.item_type === "actual" && it.is_income) return "pill-paycheck";
+    return `pill-${it.item_type}`;
+  }
+
+  function monthlyFromNet(net, freq) {
+    const n = Number(net) || 0;
+    if (freq === "weekly") return round2((n * 52) / 12);
+    if (freq === "biweekly") return round2((n * 26) / 12);
+    if (freq === "semimonthly") return round2(n * 2);
+    return round2(n);
+  }
+
+  function updatePaystubMonthly() {
+    const el = $("#ps-monthly");
+    if (!el) return;
+    el.textContent = money(monthlyFromNet($("#ps-net")?.value, $("#ps-freq")?.value));
+  }
+
+  function fillPaystubForm(p, extra = {}) {
+    if (!p) return;
+    if ($("#ps-employer")) $("#ps-employer").value = p.employer || extra.employer || "";
+    if ($("#ps-who")) {
+      $("#ps-who").value = p.employee_name || p.employee_label || extra.employee_label || "";
+    }
+    if ($("#ps-net") && (p.net_pay || extra.net_pay)) {
+      $("#ps-net").value = p.net_pay || extra.net_pay;
+    }
+    if ($("#ps-gross")) $("#ps-gross").value = p.gross_pay || extra.gross_pay || 0;
+    if ($("#ps-date") && (p.pay_date || extra.last_pay_date)) {
+      $("#ps-date").value = p.pay_date || extra.last_pay_date;
+    }
+    const freq = p.frequency_guess || p.frequency || extra.frequency;
+    if ($("#ps-freq") && freq && ["weekly", "biweekly", "semimonthly", "monthly"].includes(freq)) {
+      $("#ps-freq").value = freq;
+    }
+    const conf = $("#paystub-confidence");
+    if (conf) {
+      conf.textContent = p.confidence
+        ? `Parsed with ${p.confidence} confidence. Check net pay and pay date.`
+        : "Check these numbers, then apply.";
+    }
+    const box = $("#paystub-deductions");
+    if (box) {
+      const rows = [
+        ["Federal tax", p.federal_tax],
+        ["State tax", p.state_tax],
+        ["Social Security", p.social_security],
+        ["Medicare", p.medicare],
+        ["Retirement", p.retirement],
+        ["Health", p.health_insurance],
+      ].filter(([, v]) => v != null && Number(v) > 0);
+      box.innerHTML = rows
+        .map(
+          ([k, v]) =>
+            `<div class="stat"><div class="stat-label">${escapeHtml(k)}</div><div class="stat-value">${money(v)}</div></div>`
+        )
+        .join("");
+    }
+    updatePaystubMonthly();
+  }
+
+  async function refreshPaystub() {
+    updatePaystubMonthly();
+    const box = $("#jobs-list");
+    if (!box) return;
+    let jobs = [];
+    try {
+      jobs = await api("/api/jobs");
+    } catch (_) {
+      box.innerHTML = `<div class="empty"><h3>Could not load jobs</h3></div>`;
+      return;
+    }
+    if (!jobs.length) {
+      box.innerHTML = `<div class="empty"><h3>No saved jobs yet</h3><p>Apply a pay stub with “Save as job profile” checked.</p></div>`;
+      return;
+    }
+    box.innerHTML = jobs
+      .map((j) => {
+        const title = [j.employee_label, j.employer].filter(Boolean).join(" · ") || "Job";
+        const next = (j.next_pay_dates || []).slice(0, 3).join(", ") || "—";
+        const actions = isViewer()
+          ? ""
+          : `<div class="goal-actions">
+            <button class="btn btn-outline btn-sm" type="button" data-job-use="${j.id}">Use these numbers</button>
+            <button class="btn btn-primary btn-sm" type="button" data-job-cal="${j.id}">Put pay on calendar</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-job-del="${j.id}">Delete</button>
+          </div>`;
+        return `<div class="goal-card">
+          <h3>${escapeHtml(title)}</h3>
+          <div class="goal-meta">
+            <div>Net <strong>${money(j.net_pay)}</strong> · ${escapeHtml(j.frequency)}</div>
+            <div>About <strong>${money(j.monthly_net_estimate)}</strong>/mo take-home</div>
+            <div>Last pay: ${j.last_pay_date || "—"}</div>
+            <div>Next: ${escapeHtml(next)}</div>
+          </div>
+          ${actions}
+        </div>`;
+      })
+      .join("");
+    box.querySelectorAll("[data-job-del]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Remove this saved job?")) return;
+        await api(`/api/jobs/${btn.dataset.jobDel}`, { method: "DELETE" });
+        await refreshPaystub();
+      });
+    });
+    box.querySelectorAll("[data-job-cal]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const res = await api(`/api/jobs/${btn.dataset.jobCal}/to-calendar`, { method: "POST" });
+          alert(res.message || "Added to the calendar.");
+          await refreshDashboard().catch(() => {});
+          await refreshRecurring().catch(() => {});
+        } catch (ex) {
+          alert(ex.message);
+        }
+      });
+    });
+    box.querySelectorAll("[data-job-use]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const job = jobs.find((x) => String(x.id) === String(btn.dataset.jobUse));
+        if (job) fillPaystubForm(job, job);
+      });
+    });
+  }
+
+  async function refreshRecurring() {
+    const data = await api("/api/recurring");
+    const box = $("#recurring-list");
+    if (!box) return;
+    const items = data.items || [];
+    if (!items.length) {
+      box.innerHTML = `<div class="empty"><h3>No repeating bills yet</h3><p>Add mortgage, car, electric, water here. For water, change This month when the bill is different — later months stay the usual amount.</p></div>`;
+      return;
+    }
+    const viewer = isViewer();
+    box.innerHTML = `
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Due day</th>
+              <th class="num">This month $</th>
+              <th class="num">Usual $</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items
+              .map((r) => {
+                const thisAmt = r.this_month_amount != null ? r.this_month_amount : "";
+                const thisCell = r.this_month_id
+                  ? `<input class="input-money" data-rec-this="${r.this_month_id}" type="number" min="0.01" step="0.01" value="${thisAmt}" style="width:6.5rem" title="${r.this_month_date || ""}" />`
+                  : `<span class="text-muted">—</span>`;
+                const actions = viewer
+                  ? ""
+                  : `${
+                      r.this_month_id
+                        ? `<button class="btn btn-outline btn-sm" type="button" data-rec-save-this="${r.this_month_id}">This month</button> `
+                        : ""
+                    }<button class="btn btn-primary btn-sm" type="button" data-rec-save-later="${r.next_id}">Usual</button>
+                    <button class="btn btn-ghost btn-sm" type="button" data-rec-stop="${r.next_id}">Stop</button>`;
+                return `<tr data-rec-row="${r.next_id}" data-this-id="${r.this_month_id || ""}" data-this-date="${r.this_month_date || ""}">
+                  <td>${
+                    viewer
+                      ? escapeHtml(r.name)
+                      : `<input type="text" data-rec-name="${r.next_id}" value="${escapeAttr(r.name)}" maxlength="120" style="min-width:10rem" />`
+                  }</td>
+                  <td><span class="chip chip-${typeChip(r)}">${escapeHtml(r.item_type)}</span></td>
+                  <td>${
+                    viewer
+                      ? r.due_day
+                      : `<input type="number" data-rec-day="${r.next_id}" min="1" max="28" value="${r.due_day}" style="width:3.5rem" />`
+                  }</td>
+                  <td class="num">${thisCell}</td>
+                  <td class="num">${
+                    viewer
+                      ? money(r.typical_amount)
+                      : `<input class="input-money" data-rec-typical="${r.next_id}" type="number" min="0.01" step="0.01" value="${r.typical_amount}" style="width:6.5rem" />`
+                  }</td>
+                  <td class="day-actions">${actions}</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+      <p class="form-hint" style="margin-top:0.65rem">This month = water/electric this cycle only. Usual = later months. Stop ends the repeat from the next date.</p>`;
+    box.querySelectorAll("[data-rec-save-this]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.recSaveThis;
+        const tr = btn.closest("tr");
+        const input = box.querySelector(`[data-rec-this="${id}"]`);
+        const amt = parseFloat(input && input.value);
+        if (!amt || amt <= 0) return;
+        const payload = { amount: amt };
+        const thisDate = (tr && tr.dataset.thisDate) || "";
+        const dayEl = tr && tr.querySelector("[data-rec-day]");
+        const dueDay = parseInt(dayEl && dayEl.value, 10);
+        if (thisDate && dueDay) {
+          const parts = String(thisDate).split("-");
+          const last = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10), 0).getDate();
+          const day = Math.min(Math.max(dueDay, 1), last);
+          payload.due_date = `${parts[0]}-${parts[1]}-${String(day).padStart(2, "0")}`;
+        }
+        try {
+          await api(`/api/items/${id}?scope=this`, { method: "PATCH", json: payload });
+          await refreshRecurring();
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          alert(ex.message);
+        }
+      });
+    });
+    box.querySelectorAll("[data-rec-save-later]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.recSaveLater;
+        const rec = items.find((x) => String(x.next_id) === String(id));
+        const nameEl = box.querySelector(`[data-rec-name="${id}"]`);
+        const typicalEl = box.querySelector(`[data-rec-typical="${id}"]`);
+        const dayEl = box.querySelector(`[data-rec-day="${id}"]`);
+        const name = (nameEl && nameEl.value.trim()) || (rec && rec.name) || "";
+        const typical = parseFloat(typicalEl && typicalEl.value);
+        const dueDay = parseInt(dayEl && dayEl.value, 10);
+        const base = rec && rec.next_date ? rec.next_date : isoDate();
+        const parts = String(base).split("-");
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const last = new Date(y, m, 0).getDate();
+        const day = Math.min(Math.max(dueDay || 1, 1), last);
+        const due = `${parts[0]}-${parts[1]}-${String(day).padStart(2, "0")}`;
+        try {
+          await api(`/api/items/${id}?scope=future`, {
+            method: "PATCH",
+            json: { name, amount: typical, due_date: due },
+          });
+          await refreshRecurring();
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          alert(ex.message);
+        }
+      });
+    });
+    box.querySelectorAll("[data-rec-stop]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Stop this repeating bill from the next date onward? Past months stay.")) return;
+        await api(`/api/items/${btn.dataset.recStop}?scope=future`, { method: "DELETE" });
+        await refreshRecurring();
+        await refreshDashboard().catch(() => {});
+      });
+    });
   }
 
   // ── Input ───────────────────────────────────────────────────
@@ -1418,27 +1975,33 @@
             ? ` <span class="chip chip-success">paid</span>`
             : "";
         const paidBtn =
-          it.item_type === "bill"
+          !isViewer() && it.item_type === "bill"
             ? `<button class="btn btn-ghost btn-sm" data-toggle-paid="${it.id}" type="button">${it.is_paid ? "Unpaid" : "Paid"}</button>`
             : "";
-        return `<tr>
-          <td>${it.due_date}</td>
-          <td>${escapeHtml(it.name)}${paid}</td>
-          <td><span class="chip chip-${typeChip(it.item_type)}">${it.item_type}</span></td>
-          <td class="num ${cls}">${sign}${money(it.amount)}</td>
-          <td class="day-actions">
+        const actions = isViewer()
+          ? "<td></td>"
+          : `<td class="day-actions">
             ${paidBtn}
             <button class="btn btn-ghost btn-sm" data-edit="${it.id}" type="button">Edit</button>
             <button class="btn btn-ghost btn-sm" data-del="${it.id}" type="button">Delete</button>
-          </td>
+          </td>`;
+        return `<tr>
+          <td>${it.due_date}</td>
+          <td>${escapeHtml(it.name)}${paid}</td>
+          <td><span class="chip chip-${typeChip(it)}">${it.item_type}</span></td>
+          <td class="num ${cls}">${sign}${money(it.amount)}</td>
+          ${actions}
         </tr>`;
       })
       .join("");
 
     tbody.querySelectorAll("[data-del]").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        if (!confirm("Delete this item?")) return;
-        await api(`/api/items/${btn.dataset.del}`, { method: "DELETE" });
+        const id = Number(btn.dataset.del);
+        const item = items.find((x) => x.id === id);
+        const scope = await confirmDeleteItem(item || { frequency: "once" });
+        if (!scope) return;
+        await api(`/api/items/${id}?scope=${encodeURIComponent(scope)}`, { method: "DELETE" });
         await refreshInput();
         await refreshDashboard();
       });
@@ -1504,6 +2067,130 @@
     $("#item-name-custom").required = custom;
   }
 
+  const SUB_CHIPS = [
+    "Apple (iCloud / App Store)",
+    "Netflix",
+    "Spotify",
+    "YouTube Premium",
+    "Amazon Prime",
+    "Disney+",
+    "Hulu",
+    "iCloud+",
+    "Adobe",
+    "Microsoft 365",
+    "Gym / membership",
+  ];
+
+  async function refreshSubs() {
+    const data = await api("/api/subscriptions");
+    state.subs = data;
+    const sum = $("#subs-summary");
+    if (sum) {
+      sum.innerHTML = `
+        <div class="stat"><div class="stat-label">Per month</div><div class="stat-value">${money(data.monthly_total)}</div><div class="stat-hint">${data.count} service${data.count === 1 ? "" : "s"}</div></div>
+        <div class="stat"><div class="stat-label">Per year</div><div class="stat-value" style="color:var(--brand-light)">${money(data.yearly_total)}</div><div class="stat-hint">If they keep billing</div></div>`;
+    }
+    const chips = $("#subs-chips");
+    if (chips && !chips.dataset.ready) {
+      chips.innerHTML = SUB_CHIPS.map(
+        (n) => `<button type="button" class="btn btn-ghost btn-sm" data-sub-chip="${escapeAttr(n)}">${escapeHtml(n)}</button>`
+      ).join("");
+      chips.dataset.ready = "1";
+      chips.querySelectorAll("[data-sub-chip]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          if ($("#sub-name")) $("#sub-name").value = btn.dataset.subChip;
+        });
+      });
+    }
+    const list = $("#subs-list");
+    if (!list) return;
+    if (!data.items.length) {
+      list.innerHTML = `<div class="empty"><h3>No subscriptions spotted yet</h3><p>Add Apple, Netflix, or a gym. Importing a statement also picks up Apple.com/bill and similar charges.</p></div>`;
+      return;
+    }
+    const viewer = isViewer();
+    list.innerHTML = `
+      <div class="table-wrap subs-table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>Repeats</th>
+              <th>Next</th>
+              <th class="num">Each time</th>
+              <th class="num">/mo</th>
+              <th class="num">/year</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.items
+              .map((s) => {
+                const freqLabel =
+                  s.display_frequency === "yearly"
+                    ? "Yearly"
+                    : s.display_frequency === "weekly"
+                      ? "Weekly"
+                      : s.display_frequency === "monthly"
+                        ? "Monthly"
+                        : "Once";
+                const guess = s.guessed
+                  ? `<div class="subs-guess">Seen on statements — not a repeating bill yet</div>`
+                  : "";
+                let actions = "";
+                if (!viewer) {
+                  if (s.guessed) {
+                    actions += `<button class="btn btn-outline btn-sm" type="button" data-sub-repeat="${s.item_id}" data-name="${escapeAttr(s.name)}" data-amt="${s.amount}">Repeat monthly</button> `;
+                  }
+                  actions += `<button class="btn btn-ghost btn-sm" type="button" data-sub-hide="${escapeAttr(s.name)}">Not a sub</button>`;
+                }
+                return `<tr>
+                  <td>${escapeHtml(s.name)}${guess}</td>
+                  <td>${freqLabel}${s.repeating ? "" : ""}</td>
+                  <td>${s.next_date || "—"}</td>
+                  <td class="num">${money(s.amount)}</td>
+                  <td class="num">${money(s.monthly)}</td>
+                  <td class="num">${money(s.yearly)}</td>
+                  <td class="day-actions">${actions}</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>`;
+    list.querySelectorAll("[data-sub-hide]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await api(
+          `/api/subscriptions/ignore?name=${encodeURIComponent(btn.dataset.subHide)}`,
+          { method: "POST" }
+        );
+        await refreshSubs();
+        await refreshDashboard().catch(() => {});
+      });
+    });
+    list.querySelectorAll("[data-sub-repeat]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const due = isoDate();
+        try {
+          const res = await api("/api/subscriptions", {
+            method: "POST",
+            json: {
+              name: btn.dataset.name,
+              amount: parseFloat(btn.dataset.amt),
+              due_date: due,
+              frequency: "monthly",
+            },
+          });
+          alert(res.message || "Added as a monthly bill.");
+          await refreshSubs();
+          await refreshDashboard();
+        } catch (ex) {
+          alert(ex.message || "Could not add");
+        }
+      });
+    });
+  }
+
   // ── Goals ───────────────────────────────────────────────────
 
   async function refreshGoals() {
@@ -1544,10 +2231,15 @@
             ${eta}
             ${g.notes ? `<div class="text-muted">${escapeHtml(g.notes)}</div>` : ""}
           </div>
-          <div class="goal-actions">
+          ${
+            isViewer()
+              ? ""
+              : `<div class="goal-actions">
             <button class="btn btn-outline btn-sm" type="button" data-goal-add="${g.id}" data-amt="${g.monthly_contribution || 50}">+ Add monthly</button>
+            <button class="btn btn-outline btn-sm" type="button" data-goal-cal="${g.id}">Put this month on calendar</button>
             <button class="btn btn-ghost btn-sm" type="button" data-goal-del="${g.id}">Delete</button>
-          </div>
+          </div>`
+          }
         </div>`;
       })
       .join("");
@@ -1573,10 +2265,381 @@
         await refreshGoals();
       });
     });
+    box.querySelectorAll("[data-goal-cal]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const data = await api(
+            `/api/goals/${btn.dataset.goalCal}/to-calendar?year=${state.year}&month=${state.month}`,
+            { method: "POST" }
+          );
+          alert(data.message || "Added to the calendar.");
+          await refreshDashboard();
+          await refreshGoals();
+        } catch (ex) {
+          alert(ex.message || "Could not add to calendar");
+        }
+      });
+    });
   }
 
   function round2(n) {
     return Math.round(Number(n) * 100) / 100;
+  }
+
+  async function refreshCards() {
+    const data = await api("/api/cards");
+    const sum = $("#cards-summary");
+    if (sum) {
+      sum.innerHTML = `
+        <div class="stat"><div class="stat-label">Card balances</div><div class="stat-value negative">${money(data.total_balance || 0)}</div><div class="stat-hint">${(data.cards || []).length} card${(data.cards || []).length === 1 ? "" : "s"}</div></div>
+        <div class="stat"><div class="stat-label">Min payments / mo</div><div class="stat-value">${money(data.total_min || 0)}</div><div class="stat-hint">Feeds Debt plan</div></div>`;
+    }
+    const list = $("#cards-list");
+    if (list) {
+      if (!(data.cards || []).length) {
+        list.innerHTML = `<div class="empty"><h3>No cards yet</h3><p>Upload a credit-card PDF to pull balance, APR, and minimum payment. Checking PDFs still go under Import.</p></div>`;
+      } else {
+        list.innerHTML = data.cards
+          .map((c) => {
+            const due = c.due_date ? `Due ${c.due_date}` : "No due date yet";
+            const stmt = c.statement_date ? `Statement ${c.statement_date}` : "";
+            const last4 = c.last4 ? `…${escapeHtml(c.last4)}` : "";
+            const actions = isViewer()
+              ? ""
+              : `<div class="goal-actions">
+                  <button class="btn btn-outline btn-sm" type="button" data-card-edit="${c.id}">Edit</button>
+                  <button class="btn btn-outline btn-sm" type="button" data-card-min="${c.id}">Put pay on calendar</button>
+                  <button class="btn btn-ghost btn-sm" type="button" data-go-debts="1">Open Debt plan</button>
+                </div>`;
+            const dueVal = c.due_date || "";
+            return `<div class="goal-card">
+              <h3>${escapeHtml(c.name)} ${last4}</h3>
+              <div class="goal-meta">
+                <div>Balance <strong class="negative">${money(c.balance)}</strong> · APR <strong>${Number(c.apr || 0).toFixed(2)}%</strong></div>
+                <div>I pay <strong>${money(c.min_payment)}</strong> / mo · ${due}</div>
+                <div class="text-muted">${stmt}${c.last_interest ? ` · interest charged ${money(c.last_interest)}` : ""} · ${c.txn_count || 0} charges stored</div>
+              </div>
+              ${actions}
+              <form class="card-edit-form" data-card-form="${c.id}" hidden style="margin-top:0.85rem">
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Name</label>
+                    <input name="name" type="text" required maxlength="120" value="${escapeAttr(c.name)}" />
+                  </div>
+                  <div class="form-group">
+                    <label>Last 4</label>
+                    <input name="last4" type="text" maxlength="4" value="${escapeAttr(c.last4 || "")}" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>Balance ($)</label>
+                    <input name="balance" class="input-money" type="number" min="0" step="0.01" value="${c.balance}" />
+                  </div>
+                  <div class="form-group">
+                    <label>APR (%)</label>
+                    <input name="apr" class="input-money" type="number" min="0" max="80" step="0.01" value="${c.apr || 0}" />
+                  </div>
+                </div>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label>What I pay / mo ($)</label>
+                    <input name="min_payment" class="input-money" type="number" min="0" step="0.01" value="${c.min_payment || 0}" />
+                  </div>
+                  <div class="form-group">
+                    <label>Due date</label>
+                    <input name="due_date" type="date" value="${dueVal}" />
+                  </div>
+                </div>
+                <button class="btn btn-primary btn-sm" type="submit">Save card</button>
+                <button class="btn btn-ghost btn-sm" type="button" data-card-edit-cancel="${c.id}">Cancel</button>
+                <button class="btn btn-danger btn-sm" type="button" data-card-del="${c.id}">Delete card</button>
+                <span class="form-hint" data-card-edit-msg></span>
+              </form>
+            </div>`;
+          })
+          .join("");
+        list.querySelectorAll("[data-card-min]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            try {
+              const res = await api(`/api/cards/${btn.dataset.cardMin}/min-to-calendar`, {
+                method: "POST",
+              });
+              alert(res.message || "Added to calendar.");
+              await refreshDashboard().catch(() => {});
+            } catch (ex) {
+              alert(ex.message);
+            }
+          });
+        });
+        list.querySelectorAll("[data-go-debts]").forEach((btn) => {
+          btn.addEventListener("click", () => setView("debts"));
+        });
+        list.querySelectorAll("[data-card-edit]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const form = list.querySelector(`[data-card-form="${btn.dataset.cardEdit}"]`);
+            if (form) form.hidden = !form.hidden;
+          });
+        });
+        list.querySelectorAll("[data-card-edit-cancel]").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const form = list.querySelector(`[data-card-form="${btn.dataset.cardEditCancel}"]`);
+            if (form) form.hidden = true;
+          });
+        });
+        list.querySelectorAll("[data-card-form]").forEach((form) => {
+          form.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const id = form.dataset.cardForm;
+            const msg = form.querySelector("[data-card-edit-msg]");
+            const fd = new FormData(form);
+            const due = (fd.get("due_date") || "").toString().trim();
+            try {
+              await api(`/api/debts/${id}`, {
+                method: "PATCH",
+                json: {
+                  name: String(fd.get("name") || "").trim(),
+                  last4: String(fd.get("last4") || "").trim(),
+                  balance: parseFloat(fd.get("balance")) || 0,
+                  apr: parseFloat(fd.get("apr")) || 0,
+                  min_payment: parseFloat(fd.get("min_payment")) || 0,
+                  due_date: due || null,
+                },
+              });
+              if (msg) msg.textContent = "Saved. Debt plan and calendar min bill updated.";
+              await refreshCards();
+              await refreshDebts().catch(() => {});
+              await refreshDashboard().catch(() => {});
+            } catch (ex) {
+              if (msg) msg.textContent = ex.message;
+            }
+          });
+        });
+        list.querySelectorAll("[data-card-del]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            if (!confirm("Delete this card from the tracker? Calendar bills are not auto-deleted.")) return;
+            await api(`/api/debts/${btn.dataset.cardDel}`, { method: "DELETE" });
+            await refreshCards();
+            await refreshDebts().catch(() => {});
+          });
+        });
+      }
+    }
+    const recBox = $("#cards-recurring");
+    if (recBox) {
+      state.cardRecurring = data.recurring || [];
+      renderCardRecurring();
+    }
+  }
+
+  function renderCardRecurring() {
+    const recBox = $("#cards-recurring");
+    if (!recBox) return;
+    const rec = state.cardRecurring || [];
+    if (!rec.length) {
+      recBox.innerHTML = `<div class="empty"><h3>No repeating card charges spotted yet</h3><p>After a couple of statements, Apple, Netflix, and similar names show up here.</p></div>`;
+      return;
+    }
+    const q = (state.cardRecurringQ || "").trim().toLowerCase();
+    const kind = state.cardRecurringKind || "active";
+    const filtered = rec.filter((r) => {
+      if (kind === "active" && r.hidden) return false;
+      if (kind === "hidden" && !r.hidden) return false;
+      if (kind === "subs" && !r.looks_like_subscription) return false;
+      if (kind === "months" && !(r.months >= 2)) return false;
+      if (kind === "calendar" && !r.on_calendar) return false;
+      if (q) {
+        const blob = `${r.merchant} ${r.card_name || ""} ${r.last_description || ""}`.toLowerCase();
+        if (!blob.includes(q)) return false;
+      }
+      return true;
+    });
+    recBox.innerHTML = `<h2>Possible recurring charges</h2>
+      <p class="lead">From card statements. Hide grocery noise. Put real subscriptions on the calendar.</p>
+      <div class="form-row" style="margin-bottom:0.75rem;max-width:720px">
+        <div class="form-group">
+          <label for="card-rec-q">Filter</label>
+          <input id="card-rec-q" type="search" placeholder="Amazon, Apple…" value="${escapeAttr(state.cardRecurringQ || "")}" />
+        </div>
+        <div class="form-group">
+          <label for="card-rec-kind">Show</label>
+          <select id="card-rec-kind">
+            <option value="active" ${kind === "active" ? "selected" : ""}>Active (not hidden)</option>
+            <option value="subs" ${kind === "subs" ? "selected" : ""}>Looks like a subscription</option>
+            <option value="months" ${kind === "months" ? "selected" : ""}>Seen in 2+ months</option>
+            <option value="calendar" ${kind === "calendar" ? "selected" : ""}>On the calendar</option>
+            <option value="hidden" ${kind === "hidden" ? "selected" : ""}>Hidden / not a charge</option>
+            <option value="all" ${kind === "all" ? "selected" : ""}>All</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-wrap"><table class="data"><thead><tr>
+        <th>Merchant</th><th>Card</th><th>Times</th><th class="num">Typical</th><th>Last seen</th><th></th>
+      </tr></thead><tbody>
+      ${
+        filtered.length
+          ? filtered
+              .map((r) => {
+                const tag = r.looks_like_subscription
+                  ? `<span class="chip chip-warning">Looks like a sub</span>`
+                  : "";
+                const onCal = r.on_calendar
+                  ? `<span class="chip chip-success">On calendar</span>`
+                  : "";
+                const hidden = r.hidden ? `<span class="text-muted">Hidden</span>` : "";
+                let actions = "";
+                if (!isViewer()) {
+                  if (!r.on_calendar && !r.hidden) {
+                    actions += `<button class="btn btn-outline btn-sm" type="button" data-rec-cal="${escapeAttr(r.merchant)}" data-amt="${r.typical_amount}">Put on calendar</button> `;
+                  }
+                  if (r.on_calendar) {
+                    actions += `<button class="btn btn-ghost btn-sm" type="button" data-rec-uncal="${escapeAttr(r.merchant)}">Remove from calendar</button> `;
+                  }
+                  if (r.hidden) {
+                    actions += `<button class="btn btn-ghost btn-sm" type="button" data-rec-watch="${escapeAttr(r.key || r.merchant)}">Show again</button>`;
+                  } else {
+                    actions += `<button class="btn btn-ghost btn-sm" type="button" data-rec-hide="${escapeAttr(r.key || r.merchant)}">Not a charge</button>`;
+                  }
+                }
+                return `<tr>
+                <td>${escapeHtml(r.merchant)} ${tag} ${onCal} ${hidden}</td>
+                <td>${escapeHtml(r.card_name || "")}</td>
+                <td>${r.count} / ${r.months} mo</td>
+                <td class="num">${money(r.typical_amount)}</td>
+                <td>${r.last_date || "—"}</td>
+                <td class="day-actions">${actions}</td>
+              </tr>`;
+              })
+              .join("")
+          : `<tr><td colspan="6" class="text-muted">Nothing matches this filter.</td></tr>`
+      }
+      </tbody></table></div>`;
+    const qEl = $("#card-rec-q");
+    const kEl = $("#card-rec-kind");
+    if (qEl) {
+      qEl.addEventListener("input", () => {
+        state.cardRecurringQ = qEl.value;
+        renderCardRecurring();
+        const again = $("#card-rec-q");
+        if (again) {
+          again.focus();
+          const v = again.value;
+          again.setSelectionRange(v.length, v.length);
+        }
+      });
+    }
+    if (kEl) {
+      kEl.addEventListener("change", () => {
+        state.cardRecurringKind = kEl.value;
+        renderCardRecurring();
+      });
+    }
+    recBox.querySelectorAll("[data-rec-cal]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const res = await api(
+            `/api/cards/recurring/to-calendar?merchant=${encodeURIComponent(btn.dataset.recCal)}&amount=${encodeURIComponent(btn.dataset.amt)}&year=${state.year}&month=${state.month}`,
+            { method: "POST" }
+          );
+          alert(res.message || "Added.");
+          await refreshCards();
+          await refreshDashboard().catch(() => {});
+          await refreshSubs().catch(() => {});
+        } catch (ex) {
+          alert(ex.message);
+        }
+      });
+    });
+    recBox.querySelectorAll("[data-rec-uncal]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await api(
+          `/api/cards/recurring/remove-calendar?merchant=${encodeURIComponent(btn.dataset.recUncal)}`,
+          { method: "POST" }
+        );
+        await refreshCards();
+        await refreshDashboard().catch(() => {});
+      });
+    });
+    recBox.querySelectorAll("[data-rec-hide]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await api(
+          `/api/cards/recurring/mark?key=${encodeURIComponent(btn.dataset.recHide)}&status=ignore`,
+          { method: "POST" }
+        );
+        await refreshCards();
+      });
+    });
+    recBox.querySelectorAll("[data-rec-watch]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        await api(
+          `/api/cards/recurring/mark?key=${encodeURIComponent(btn.dataset.recWatch)}&status=watch`,
+          { method: "POST" }
+        );
+        await refreshCards();
+      });
+    });
+  }
+
+  function renderCardPreview(data) {
+    state.cardPreview = data;
+    const box = $("#card-preview-box");
+    const stats = $("#card-preview-stats");
+    const tbody = $("#card-preview-txns tbody");
+    if (!box) return;
+    box.style.display = "block";
+    const s = data.summary || {};
+    const match = data.matched_debt_name
+      ? `Will update <strong>${escapeHtml(data.matched_debt_name)}</strong>. Edit APR and auto-pay below before you save.`
+      : "Will create a new card in Debt plan. Edit APR and auto-pay below if the PDF left them blank.";
+    const matchEl = $("#card-preview-match");
+    if (matchEl) matchEl.innerHTML = match;
+    if (stats) {
+      stats.innerHTML = `
+        <div class="stat"><div class="stat-label">From PDF</div><div class="stat-value">${escapeHtml(s.card_name || "Card")}${s.last4 ? " …" + escapeHtml(s.last4) : ""}</div><div class="stat-hint">${(data.transactions || []).length} charge${(data.transactions || []).length === 1 ? "" : "s"}</div></div>
+        <div class="stat"><div class="stat-label">Statement min</div><div class="stat-value">${s.min_payment != null ? money(s.min_payment) : "—"}</div><div class="stat-hint">${s.due_date ? "Due " + s.due_date : "Edit due date below"}</div></div>
+        <div class="stat"><div class="stat-label">PDF APR</div><div class="stat-value">${s.apr != null ? Number(s.apr).toFixed(2) + "%" : "Not found"}</div><div class="stat-hint">${s.apr != null ? "You can still change it" : "Type it from the statement"}</div></div>
+        <div class="stat"><div class="stat-label">Interest charged</div><div class="stat-value">${s.interest_charged != null ? money(s.interest_charged) : "—"}</div><div class="stat-hint">This statement</div></div>`;
+    }
+    const stmtMin = s.min_payment != null ? Number(s.min_payment) : Number(data.matched_min_payment) || 0;
+    const aprVal =
+      s.apr != null && Number(s.apr) > 0
+        ? Number(s.apr)
+        : Number(data.matched_apr) > 0
+          ? Number(data.matched_apr)
+          : "";
+    const payDefault =
+      Number(data.matched_min_payment) > stmtMin
+        ? Number(data.matched_min_payment)
+        : stmtMin;
+    if ($("#card-edit-balance")) {
+      $("#card-edit-balance").value =
+        s.new_balance != null && s.new_balance !== "" ? Number(s.new_balance) : "";
+    }
+    if ($("#card-edit-apr")) $("#card-edit-apr").value = aprVal;
+    if ($("#card-edit-stmt-min")) $("#card-edit-stmt-min").value = stmtMin || "";
+    if ($("#card-edit-pay")) $("#card-edit-pay").value = payDefault || "";
+    if ($("#card-edit-due")) $("#card-edit-due").value = s.due_date || "";
+    const minHint = $("#card-stmt-min-hint");
+    if (minHint) {
+      minHint.textContent = stmtMin
+        ? `PDF minimum ${money(stmtMin)} — auto-pay can be higher`
+        : "Type the statement minimum if it was blank";
+    }
+    if (tbody) {
+      const rows = data.transactions || [];
+      tbody.innerHTML = rows.length
+        ? rows
+            .map(
+              (t) => `<tr>
+                <td>${t.date || "—"}</td>
+                <td>${escapeHtml(t.description)}</td>
+                <td class="num ${t.is_credit ? "positive" : "negative"}">${t.is_credit ? "+" : "−"}${money(t.amount)}</td>
+                <td>${t.is_credit ? "Payment / credit" : escapeHtml(t.category || "")}</td>
+              </tr>`
+            )
+            .join("")
+        : `<tr><td colspan="4" class="text-muted">No individual charges parsed — totals above can still be saved.</td></tr>`;
+    }
   }
 
   // ── Debts ───────────────────────────────────────────────────
@@ -1612,11 +2675,11 @@
       tbody.innerHTML = debts
         .map(
           (d) => `<tr>
-          <td>${escapeHtml(d.name)}</td>
+          <td>${escapeHtml(d.name)}${d.last4 ? ` <span class="text-muted">…${escapeHtml(d.last4)}</span>` : ""}</td>
           <td class="num">${money(d.balance)}</td>
           <td class="num">${Number(d.apr).toFixed(2)}%</td>
           <td class="num">${money(d.min_payment)}</td>
-          <td><button class="btn btn-ghost btn-sm" type="button" data-debt-del="${d.id}">Delete</button></td>
+          <td>${isViewer() ? "" : `<button class="btn btn-ghost btn-sm" type="button" data-debt-del="${d.id}">Delete</button>`}</td>
         </tr>`
         )
         .join("");
@@ -1749,8 +2812,12 @@
           <td class="num">${money(r.monthly_contribution)}</td>
           <td class="text-muted">${r.last_updated || "—"}</td>
           <td style="white-space:nowrap">
-            <button class="btn btn-outline btn-sm" type="button" data-inv-upd="${r.id}" data-val="${r.current_value}">Update $</button>
-            <button class="btn btn-ghost btn-sm" type="button" data-inv-del="${r.id}">Delete</button>
+            ${
+              isViewer()
+                ? ""
+                : `<button class="btn btn-outline btn-sm" type="button" data-inv-upd="${r.id}" data-val="${r.current_value}">Update $</button>
+            <button class="btn btn-ghost btn-sm" type="button" data-inv-del="${r.id}">Delete</button>`
+            }
           </td>
         </tr>`;
       })
@@ -1821,7 +2888,9 @@
           const isMe = (m.username || "").toLowerCase() === meName;
           const delBtn = isMe
             ? `<span class="text-muted" style="font-size:0.75rem">you</span>`
-            : `<button class="btn btn-danger btn-sm" type="button" data-member-del="${m.id}" data-member-name="${escapeAttr(m.display_name || m.username)}">Delete</button>`;
+            : isViewer()
+              ? ""
+              : `<button class="btn btn-danger btn-sm" type="button" data-member-del="${m.id}" data-member-name="${escapeAttr(m.display_name || m.username)}">Delete</button>`;
           return `<div style="display:flex;justify-content:space-between;align-items:center;gap:0.75rem;padding:0.55rem 0;border-bottom:1px solid var(--border)">
           <div>
             <strong class="text-primary">${escapeHtml(m.display_name)}</strong>
@@ -2140,7 +3209,7 @@
     if (!tbody) return;
     if (!state.importRows.length) {
       if (toolbar) toolbar.style.display = "none";
-      tbody.innerHTML = `<tr><td colspan="7" class="text-muted">Preview a statement to choose what to import.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="text-muted">Preview a checking statement, then Preview the credit-card file — both stay in this list.</td></tr>`;
       updateImportSelectedCount();
       return;
     }
@@ -2162,6 +3231,7 @@
               ${r.selected && !missing ? "checked" : ""} ${missing ? "disabled" : ""} />
           </td>
           <td>${r.date || "— missing"}</td>
+          <td class="text-muted" style="font-size:0.78rem">${escapeHtml(r.source || "")}</td>
           <td>${escapeHtml(r.description)}</td>
           <td class="num ${cls}">${money(r.amount)}</td>
           <td>${r.is_income ? "In" : "Out"}</td>
@@ -2217,18 +3287,11 @@
     rebuildImportDebtsFromSelection();
   }
 
-  async function runImportPreview() {
-    const file = $("#statement-file").files[0];
-    if (!file) {
-      $("#import-msg").textContent = "Choose a CSV or PDF file first.";
-      return;
-    }
-    const msgEl = $("#import-msg");
-    if (msgEl) {
-      msgEl.textContent = "Reading file…";
-      msgEl.style.color = "";
-    }
-    const bank = $("#import-bank")?.value || "auto";
+  function importRowKey(r) {
+    return `${r.date || ""}|${Number(r.amount || 0).toFixed(2)}|${(r.description || "").trim().toLowerCase().slice(0, 80)}`;
+  }
+
+  async function previewOneFile(file, bank) {
     const fd = new FormData();
     fd.append("file", file);
     const qs = `commit=false&bank=${encodeURIComponent(bank)}`;
@@ -2245,35 +3308,104 @@
       }
       throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
     }
-    const data = await res.json();
-    state.importCategories = data.categories || DEFAULT_IMPORT_CATS;
-    state.importBankLabel = data.bank_label || "Import";
-    state.importRows = (data.rows || []).map((r) => ({
-      date: r.date,
-      description: r.description,
-      amount: r.amount,
-      is_income: !!r.is_income,
-      category: r.category || (r.is_income ? "Income" : "Other"),
-      // Backend unchecks possible duplicates; respect that
-      selected: r.selected === true && !!r.date && r.amount > 0,
-      possible_duplicate: !!r.possible_duplicate,
-      raw: r.raw || "",
-    }));
-    state.importDebts = [];
-    if (msgEl) msgEl.textContent = data.message || "Preview ready — select rows and categories.";
+    return res.json();
+  }
+
+  async function runImportPreview() {
+    const input = $("#statement-file");
+    const files = input && input.files ? [...input.files] : [];
+    if (!files.length) {
+      $("#import-msg").textContent = "Choose one or more CSV/PDF files first (checking and card can both go in).";
+      return;
+    }
+    const msgEl = $("#import-msg");
+    if (msgEl) {
+      msgEl.textContent = files.length > 1 ? `Reading ${files.length} files…` : "Reading file…";
+      msgEl.style.color = "";
+    }
+    const bank = $("#import-bank")?.value || "auto";
+    const existingKeys = new Set(state.importRows.map(importRowKey));
+    let added = 0;
+    let skippedDup = 0;
+    const labels = [];
+    for (const file of files) {
+      const data = await previewOneFile(file, bank);
+      if (data.categories && data.categories.length) {
+        state.importCategories = data.categories;
+      }
+      const label = data.bank_label || "Import";
+      const source = `${label} · ${file.name}`;
+      labels.push(source);
+      const incoming = (data.rows || []).map((r) => ({
+        date: r.date,
+        description: r.description,
+        amount: r.amount,
+        is_income: !!r.is_income,
+        category: r.category || (r.is_income ? "Income" : "Other"),
+        selected: r.selected === true && !!r.date && r.amount > 0,
+        possible_duplicate: !!r.possible_duplicate,
+        raw: r.raw || "",
+        source,
+      }));
+      for (const row of incoming) {
+        const key = importRowKey(row);
+        if (existingKeys.has(key)) {
+          skippedDup += 1;
+          continue;
+        }
+        existingKeys.add(key);
+        state.importRows.push(row);
+        added += 1;
+      }
+    }
+    state.importBankLabel = labels[labels.length - 1] || state.importBankLabel || "Import";
+    if (input) input.value = "";
+    const parts = [`Added ${added} row(s) from ${files.length} file(s).`];
+    if (skippedDup) parts.push(`${skippedDup} already in this list were skipped.`);
+    parts.push("Preview another file to add it, then Import selected. This does not erase the calendar.");
+    if (msgEl) msgEl.textContent = parts.join(" ");
     const badge = $("#import-bank-badge");
     if (badge) {
-      badge.innerHTML = data.bank_label
-        ? `Detected / used: <strong class="text-primary">${escapeHtml(data.bank_label)}</strong>`
+      const sources = [...new Set(state.importRows.map((r) => r.source).filter(Boolean))];
+      badge.innerHTML = sources.length
+        ? `In the list: <strong class="text-primary">${escapeHtml(sources.join(" · "))}</strong>`
         : "";
     }
     renderImportTable();
   }
 
+  function clearImportList() {
+    state.importRows = [];
+    state.importDebts = [];
+    const input = $("#statement-file");
+    if (input) input.value = "";
+    const badge = $("#import-bank-badge");
+    if (badge) badge.innerHTML = "";
+    const msgEl = $("#import-msg");
+    if (msgEl) {
+      msgEl.textContent = "Preview list cleared. Calendar items already saved were not deleted.";
+      msgEl.style.color = "";
+    }
+    renderImportTable();
+  }
+
   async function runImportSelected() {
-    const selected = state.importRows.filter((r) => r.selected && r.date && r.amount > 0);
+    if (!state.importRows.length) {
+      throw new Error(
+        "No transactions were found in that file. Chase PDFs from chase.com (not a phone photo) work best. You can also download CSV: Account → See all activity → Download. If the preview table is empty, there is nothing to import yet."
+      );
+    }
+    const dated = state.importRows.filter((r) => r.date && r.amount > 0);
+    const selected = dated.filter((r) => r.selected);
+    if (!dated.length) {
+      throw new Error(
+        "The PDF opened, but no row has both a date and an amount. This layout may be a scanned image or a credit-card PDF we could not read. Try Chase CSV, or add the charges by hand on Money in / out."
+      );
+    }
     if (!selected.length) {
-      throw new Error("Select at least one row with a date and amount.");
+      throw new Error(
+        "No rows are checked. Tick the boxes on the left (or tap Select all), then Import selected. Possible duplicates start unchecked on purpose."
+      );
     }
     const msgEl = $("#import-msg");
     if (msgEl) {
@@ -2306,6 +3438,7 @@
         is_income: r.category === "Income" ? true : !!r.is_income,
         category: r.category || "Other",
         item_type: r.category === "Income" || r.is_income ? "paycheck" : "actual",
+        source: r.source || state.importBankLabel || "Import",
       })),
       debts,
     };
@@ -2317,7 +3450,7 @@
       msgEl.textContent = data.message || `Saved ${data.imported}`;
       msgEl.style.color = "var(--success)";
     }
-    const jump = data.first_date || data.last_date;
+    const jump = data.last_date || data.first_date;
     if (jump) {
       const d = new Date(String(jump) + "T12:00:00");
       if (!Number.isNaN(d.getTime())) {
@@ -2331,12 +3464,20 @@
         `\n\nDebt plan: ${data.debts_created || 0} card(s) added, ` +
         `${data.debts_updated || 0} updated with APR/balance. Open Debt plan to run paydown.`;
     }
+    const savedKeys = new Set(selected.map(importRowKey));
+    state.importRows = state.importRows.filter((r) => !savedKeys.has(importRowKey(r)));
+    renderImportTable();
+    const leftover = state.importRows.length;
+    const stayMsg = leftover
+      ? ` ${leftover} other preview row(s) are still here.`
+      : " Preview another statement (checking or card) to add it — it will not replace what you just saved.";
+    if (msgEl) {
+      msgEl.textContent = (data.message || `Saved ${data.imported}`) + extra + stayMsg;
+    }
     alert(
       `${data.message || `Saved ${data.imported} item(s).`}${extra}\n\n` +
-        `Switching to Home for that month.`
+        `Those stay on the calendar. You can Preview the other statement next (checking + card both keep).`
     );
-    setView("dashboard");
-    await refreshDashboard();
   }
 
   function escapeHtml(s) {
@@ -2486,7 +3627,8 @@
         const id = $("#edit-item-id").value;
         try {
           const itemType = $("#edit-item-type").value;
-          await api(`/api/items/${id}`, {
+          const scope = editScopeValue();
+          await api(`/api/items/${id}?scope=${encodeURIComponent(scope)}`, {
             method: "PATCH",
             json: {
               name: $("#edit-item-name").value.trim(),
@@ -2498,6 +3640,7 @@
               category: $("#edit-item-category").value,
               is_income: itemType === "paycheck",
               is_paid: !!$("#edit-item-paid")?.checked,
+              is_subscription: !!$("#edit-item-sub")?.checked,
             },
           });
           if (msg) msg.textContent = "Saved.";
@@ -2595,6 +3738,9 @@
       if (f === "monthly") {
         hint.textContent =
           "Same day each month (like rent). Later months fill in by themselves.";
+      } else if (f === "yearly") {
+        hint.textContent =
+          "Once a year (Amazon Prime, some Apple plans). Next year fills in by itself.";
       } else if (f === "biweekly") {
         hint.textContent =
           "Every 2 weeks (like many paychecks). Later months fill in by themselves.";
@@ -2645,6 +3791,7 @@
             notes: $("#item-notes").value,
             category: itemType === "balance" ? "Balance" : $("#item-category").value,
             retain_name: $("#item-retain").checked,
+            is_subscription: !!$("#item-sub")?.checked,
           },
         });
         if (itemType === "balance") {
@@ -2726,6 +3873,10 @@
         $("#import-msg").textContent = ex.message;
       }
     });
+    const clearImport = $("#btn-import-clear");
+    if (clearImport) {
+      clearImport.addEventListener("click", () => clearImportList());
+    }
     $("#btn-commit-import").addEventListener("click", async () => {
       try {
         await runImportSelected();
@@ -2795,7 +3946,241 @@
       }
     });
 
+    const parseStub = $("#btn-parse-paystub");
+    if (parseStub) {
+      parseStub.addEventListener("click", async () => {
+        const file = $("#paystub-file")?.files?.[0];
+        const msg = $("#paystub-parse-msg");
+        if (!file) {
+          if (msg) msg.textContent = "Choose a PDF first.";
+          return;
+        }
+        if (msg) msg.textContent = "Reading pay stub…";
+        try {
+          const fd = new FormData();
+          fd.append("file", file);
+          const res = await fetch("/api/paystub/parse", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${state.token}` },
+            body: fd,
+          });
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            throw new Error(j.detail || "Could not read PDF");
+          }
+          const data = await res.json();
+          fillPaystubForm(data.parsed || {});
+          if (msg) msg.textContent = data.message || "Check the numbers, then apply.";
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message || "Could not read PDF";
+        }
+      });
+    }
+    const psNet = $("#ps-net");
+    const psFreq = $("#ps-freq");
+    if (psNet) psNet.addEventListener("input", updatePaystubMonthly);
+    if (psFreq) psFreq.addEventListener("change", updatePaystubMonthly);
+    const psForm = $("#paystub-apply-form");
+    if (psForm) {
+      psForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = $("#paystub-apply-msg");
+        try {
+          const data = await api("/api/paystub/apply", {
+            method: "POST",
+            json: {
+              employer: $("#ps-employer")?.value.trim() || "Paycheck",
+              employee_label: $("#ps-who")?.value.trim() || "",
+              net_pay: parseFloat($("#ps-net").value),
+              gross_pay: parseFloat($("#ps-gross")?.value) || 0,
+              pay_date: $("#ps-date").value,
+              frequency: $("#ps-freq")?.value || "biweekly",
+              create_paycheck: !!$("#ps-create")?.checked,
+              save_job_profile: !!$("#ps-save-job")?.checked,
+              schedule_future: parseInt($("#ps-future")?.value || "0", 10),
+              notes: $("#ps-notes")?.value || "",
+            },
+          });
+          if (msg) msg.textContent = data.message || "Saved.";
+          await refreshPaystub();
+          await refreshDashboard();
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message;
+        }
+      });
+    }
+
+    const subsForm = $("#subs-form");
+    if (subsForm) {
+      const subDate = $("#sub-date");
+      if (subDate && !subDate.value) subDate.value = isoDate();
+      subsForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = $("#subs-form-msg");
+        try {
+          const data = await api("/api/subscriptions", {
+            method: "POST",
+            json: {
+              name: $("#sub-name").value.trim(),
+              amount: parseFloat($("#sub-amount").value),
+              due_date: $("#sub-date").value,
+              frequency: $("#sub-freq").value || "monthly",
+            },
+          });
+          if (msg) msg.textContent = data.message || "Saved.";
+          $("#sub-name").value = "";
+          $("#sub-amount").value = "";
+          await refreshSubs();
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message;
+        }
+      });
+    }
+
+    const cardPrev = $("#btn-card-preview");
+    if (cardPrev) {
+      cardPrev.addEventListener("click", async () => {
+        const file = $("#card-stmt-file")?.files?.[0];
+        const msg = $("#card-preview-msg");
+        if (!file) {
+          if (msg) msg.textContent = "Choose a credit-card PDF first.";
+          return;
+        }
+        if (msg) msg.textContent = "Reading statement…";
+        try {
+          const fd = new FormData();
+          fd.append("file", file);
+          const res = await fetch("/api/cards/preview", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${state.token}` },
+            body: fd,
+          });
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            throw new Error(j.detail || "Could not read PDF");
+          }
+          const data = await res.json();
+          renderCardPreview(data);
+          if (msg) msg.textContent = data.message || "Check the totals, then save.";
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message;
+        }
+      });
+    }
+    const cardApply = $("#btn-card-apply");
+    if (cardApply) {
+      cardApply.addEventListener("click", async () => {
+        const p = state.cardPreview;
+        const msg = $("#card-apply-msg");
+        if (!p || !p.summary) {
+          if (msg) msg.textContent = "Read a statement first.";
+          return;
+        }
+        const s = p.summary;
+        const stmtMin = parseFloat($("#card-edit-stmt-min")?.value);
+        const pay = parseFloat($("#card-edit-pay")?.value);
+        const monthlyPay = Number.isFinite(pay) && pay > 0 ? pay : Number.isFinite(stmtMin) ? stmtMin : 0;
+        try {
+          const data = await api("/api/cards/apply", {
+            method: "POST",
+            json: {
+              debt_id: p.matched_debt_id || null,
+              name: s.card_name || "Chase card",
+              last4: s.last4 || "",
+              new_balance: parseFloat($("#card-edit-balance")?.value) || 0,
+              apr: parseFloat($("#card-edit-apr")?.value) || 0,
+              min_payment: monthlyPay,
+              due_date: $("#card-edit-due")?.value || s.due_date || null,
+              statement_date: s.statement_date || null,
+              last_interest: Number(s.interest_charged) || 0,
+              transactions: (p.transactions || []).map((t) => ({
+                date: t.date,
+                description: t.description,
+                amount: t.amount,
+                is_credit: !!t.is_credit,
+                category: t.category || "",
+              })),
+              put_min_on_calendar: !!$("#card-put-min")?.checked,
+            },
+          });
+          if (msg) msg.textContent = data.message || "Saved.";
+          state.cardPreview = null;
+          const box = $("#card-preview-box");
+          if (box) box.style.display = "none";
+          const file = $("#card-stmt-file");
+          if (file) file.value = "";
+          await refreshCards();
+          await refreshDebts().catch(() => {});
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message;
+        }
+      });
+    }
+
+    const recAdd = $("#recurring-add-form");
+    if (recAdd) {
+      recAdd.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = $("#rec-add-msg");
+        const freq = $("#rec-add-freq")?.value || "monthly";
+        const t = new Date();
+        let dueStr = ($("#rec-add-start")?.value || "").trim();
+        if (freq === "monthly") {
+          const day = parseInt($("#rec-add-day").value, 10) || 1;
+          const last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+          const d = Math.min(Math.max(day, 1), last);
+          const due = new Date(t.getFullYear(), t.getMonth(), d);
+          dueStr = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`;
+        } else if (!dueStr) {
+          dueStr = isoDate(t);
+        }
+        try {
+          await api("/api/items", {
+            method: "POST",
+            json: {
+              name: $("#rec-add-name").value.trim(),
+              item_type: $("#rec-add-type").value || "bill",
+              amount: parseFloat($("#rec-add-amount").value),
+              due_date: dueStr,
+              frequency: freq,
+              is_income: ($("#rec-add-type").value || "") === "paycheck",
+              retain_name: true,
+            },
+          });
+          if (msg) msg.textContent = "Added.";
+          $("#rec-add-name").value = "";
+          $("#rec-add-amount").value = "";
+          await refreshRecurring();
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message;
+        }
+      });
+    }
+
     $("#btn-run-plan").addEventListener("click", () => runDebtPlan());
+    const debtCalBtn = $("#btn-debt-cal");
+    if (debtCalBtn) {
+      debtCalBtn.addEventListener("click", async () => {
+        const extra = parseFloat($("#plan-extra")?.value);
+        if (!extra || extra <= 0) {
+          alert("Enter an extra monthly payment first (above).");
+          return;
+        }
+        try {
+          const data = await api(
+            `/api/debts/extra-to-calendar?extra_monthly=${encodeURIComponent(extra)}&year=${state.year}&month=${state.month}`,
+            { method: "POST" }
+          );
+          alert(data.message || "Added to the calendar.");
+          await refreshDashboard();
+        } catch (ex) {
+          alert(ex.message || "Could not add to calendar");
+        }
+      });
+    }
 
     const invForm = $("#invest-form");
     if (invForm) {
@@ -2907,7 +4292,8 @@
             const out = $("#rescue-settings-code");
             if (out) out.textContent = res.rescue_code;
           } else if (msg) {
-            msg.textContent = "Password updated.";
+            msg.textContent =
+              (res && res.message) || "Password updated. Other devices were signed out.";
           }
           $("#set-pw-current").value = "";
           $("#set-pw-new").value = "";

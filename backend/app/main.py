@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import secrets
 from calendar import monthrange
 from datetime import date, datetime, timedelta
@@ -9,8 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import shutil
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session
 from .db import Base, engine, get_db, migrate_sqlite
 from .models import (
     BudgetItem,
+    CardRecurringMark,
+    CardTransaction,
     Debt,
     Goal,
     Household,
@@ -42,6 +44,7 @@ from .schemas import (
     BudgetItemUpdate,
     CalendarDay,
     CalendarResponse,
+    CardApplyRequest,
     DebtCreate,
     DebtOut,
     DebtPlanRequest,
@@ -67,6 +70,7 @@ from .schemas import (
     PasswordChangeRequest,
     RescueResetRequest,
     PayStubApplyRequest,
+    SubscriptionCreate,
     ImportCommitRequest,
     ImportCommitResponse,
     SnapshotOut,
@@ -79,13 +83,26 @@ from .bank_pdf import parse_statement_pdf
 from .categorize import (
     IMPORT_CATEGORIES,
     is_credit_card_category,
+    looks_like_subscription,
     suggest_card_name,
     suggest_category,
 )
-from .seed import seed_if_empty
-from .recurring import ensure_recurring_through
+from .seed import ensure_subscription_names, seed_if_empty
+from .subscriptions import summarize_subscriptions
+from .card_statement import find_recurring_charges, parse_card_pdf
+from .recurring import (
+    RECURRING,
+    REPEAT_TYPES,
+    _add_months,
+    delete_series,
+    ensure_recurring_through,
+    next_after,
+    series_key,
+    update_series,
+)
 from .backup_store import backup_status, maybe_monthly_backup, save_local_backup
 from .rescue import allow_recover_attempt, make_rescue_code, normalize_rescue_code
+from .auth_limits import allow_login_attempt, clear_login_failures, record_login_failure
 from .updater import (
     apply_update,
     fetch_latest_version,
@@ -102,19 +119,25 @@ DEFAULT_IDLE_MINUTES = 30
 MIN_IDLE_MINUTES = 10
 MAX_IDLE_MINUTES = 120
 
+# Viewer may look (GET) and do these non-GET calls. Everything else is blocked.
+VIEWER_SAFE_WRITE_PATHS = {
+    "/api/logout",
+    "/api/me/password",
+    "/api/debts/plan",
+}
+VIEWER_BLOCKED_GET_PATHS = {
+    "/api/backup",  # full database download
+}
+VIEWER_WRITE_DETAIL = (
+    "This login can look only. Ask an adult to change bills or settings."
+)
+LOGIN_RETRY_DETAIL = "Too many wrong passwords. Wait 15 minutes, then try again."
+
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
 BRAND = ROOT / "brand"
 
-app = FastAPI(title="Household Money", version="0.1.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="Household Money", version=read_local_version())
 
 
 @app.on_event("startup")
@@ -124,12 +147,14 @@ def on_startup() -> None:
     db = next(get_db())
     try:
         seed_if_empty(db)
+        ensure_subscription_names(db)
         maybe_monthly_backup()
     finally:
         db.close()
 
 
 def current_user(
+    request: Request,
     authorization: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),
 ) -> User:
@@ -158,7 +183,33 @@ def current_user(
     user = db.get(User, row.user_id)
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    _enforce_viewer_readonly(request, user)
     return user
+
+
+def _enforce_viewer_readonly(request: Request, user: User) -> None:
+    if (user.role or "").strip().lower() != "viewer":
+        return
+    path = (request.url.path or "/").rstrip("/") or "/"
+    method = (request.method or "GET").upper()
+    if path in VIEWER_BLOCKED_GET_PATHS:
+        raise HTTPException(status_code=403, detail=VIEWER_WRITE_DETAIL)
+    if method not in ("GET", "HEAD", "OPTIONS") and path not in VIEWER_SAFE_WRITE_PATHS:
+        raise HTTPException(status_code=403, detail=VIEWER_WRITE_DETAIL)
+
+
+def _session_token_from_header(authorization: Optional[str]) -> Optional[str]:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    return token or None
+
+
+def _revoke_other_sessions(db: Session, user_id: int, keep_token: Optional[str]) -> None:
+    q = db.query(SessionToken).filter(SessionToken.user_id == user_id)
+    if keep_token:
+        q = q.filter(SessionToken.token != keep_token)
+    q.delete(synchronize_session=False)
 
 
 def get_household(db: Session) -> Household:
@@ -206,12 +257,17 @@ def _clamp_idle(raw) -> int:
 
 @app.post("/api/login", response_model=LoginResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == body.username.strip().lower()).first()
+    username = body.username.strip()
+    if not allow_login_attempt(username):
+        raise HTTPException(status_code=429, detail=LOGIN_RETRY_DETAIL)
+    user = db.query(User).filter(User.username == username.lower()).first()
     # usernames stored lowercase-ish; also try exact
     if not user:
-        user = db.query(User).filter(User.username == body.username.strip()).first()
+        user = db.query(User).filter(User.username == username).first()
     if not user or not pwd.verify(body.password, user.password_hash):
+        record_login_failure(username)
         raise HTTPException(status_code=401, detail="Wrong username or password")
+    clear_login_failures(username)
     token = secrets.token_hex(32)
     now = datetime.utcnow()
     db.add(SessionToken(token=token, user_id=user.id, created_at=now, last_seen=now))
@@ -254,6 +310,7 @@ def me(user: User = Depends(current_user), db: Session = Depends(get_db)):
 @app.post("/api/me/password")
 def change_password(
     body: PasswordChangeRequest,
+    authorization: Optional[str] = Header(default=None),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
@@ -276,12 +333,16 @@ def change_password(
     if not (getattr(hh, "recovery_key_hash", "") or ""):
         rescue_code = make_rescue_code()
         hh.recovery_key_hash = pwd.hash(normalize_rescue_code(rescue_code))
+    keep = _session_token_from_header(authorization)
+    _revoke_other_sessions(db, user.id, keep)
     db.commit()
     return {
         "ok": True,
         "must_change_password": False,
         "rescue_code": rescue_code,
         "rescue_code_new": bool(rescue_code),
+        "other_sessions_signed_out": True,
+        "message": "Password updated. Other devices were signed out.",
     }
 
 
@@ -470,6 +531,13 @@ def _repeat_dates(start: date, frequency: str, months_ahead: int = 3) -> list[da
             last = monthrange(y, m)[1]
             dates.append(date(y, m, min(day, last)))
         return dates
+    if frequency == "yearly":
+        y, m, day = start.year, start.month, start.day
+        for n in range(1, 3):
+            yy = y + n
+            last = monthrange(yy, m)[1]
+            dates.append(date(yy, m, min(day, last)))
+        return dates
     step = 14 if frequency == "biweekly" else 7 if frequency == "weekly" else 0
     if step <= 0:
         return [start]
@@ -498,6 +566,10 @@ def create_item(
     if body.item_type in ("bill", "estimate", "actual") and body.is_income is False:
         is_income = False
 
+    sub_flag = body.is_subscription
+    if sub_flag is None and looks_like_subscription(name, body.category or ""):
+        sub_flag = True
+
     # Bank balance is always a one-time snapshot
     freq = "once" if body.item_type == "balance" else (body.frequency or "once")
     schedule = (
@@ -519,6 +591,7 @@ def create_item(
             notes=body.notes or "",
             is_paid=bool(body.is_paid) if i == 0 else False,
             category=body.category or "",
+            is_subscription=sub_flag,
         )
         db.add(item)
         if first is None:
@@ -555,10 +628,170 @@ def create_item(
     return first
 
 
+_BILL_NAME_HINTS: list[tuple[str, str, str]] = [
+    (r"pennymac", "Mortgage (PennyMac)", "bill"),
+    (r"kmf", "Car payment (KMF)", "bill"),
+    (r"sumter electric", "Electric (Sumter)", "bill"),
+    (r"grovelan", "Water (Groveland)", "bill"),
+    (r"verizon", "Verizon Wireless", "bill"),
+    (r"state farm", "State Farm insurance", "bill"),
+    (r"farm bureau", "Farm Bureau insurance", "bill"),
+    (r"sunstrong", "Sunstrong", "bill"),
+    (r"fid bkg|moneyline|fidelity", "Fidelity savings", "estimate"),
+]
+
+
+def _friendly_bill_name(raw: str) -> tuple[str, str]:
+    text = (raw or "").strip()
+    low = text.lower()
+    for pat, name, kind in _BILL_NAME_HINTS:
+        if re.search(pat, low):
+            return name, kind
+    # Strip bank junk from the original
+    cleaned = re.split(r"\s+(?:PPD ID:|Web ID:|Tel ID:|Transaction#)", text, maxsplit=1)[0]
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()[:120] or "Monthly bill"
+    return cleaned, "bill"
+
+
+def _next_monthly_due(from_day: date, today: date | None = None) -> date:
+    today = today or date.today()
+    due = date(today.year, today.month, min(from_day.day, monthrange(today.year, today.month)[1]))
+    if due < today:
+        nxt = _add_months(due, 1, from_day.day)
+        return nxt or due
+    return due
+
+
+@app.post("/api/items/{item_id}/to-monthly-bill")
+def item_to_monthly_bill(
+    item_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Turn a one-time bank line into a repeating monthly bill on the calendar."""
+    hh = get_household(db)
+    item = (
+        db.query(BudgetItem)
+        .filter(BudgetItem.id == item_id, BudgetItem.household_id == hh.id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    if item.item_type == "balance":
+        raise HTTPException(status_code=400, detail="Bank balance is not a bill.")
+    name, kind = _friendly_bill_name(item.name)
+    existing = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.name == name,
+            BudgetItem.frequency == "monthly",
+            BudgetItem.item_type.in_(("bill", "estimate")),
+        )
+        .first()
+    )
+    if existing:
+        return {
+            "ok": True,
+            "created": False,
+            "item_id": existing.id,
+            "message": f"{name} is already a monthly {existing.item_type} on the calendar.",
+        }
+    due = _next_monthly_due(item.due_date)
+    schedule = _repeat_dates(due, "monthly", months_ahead=12)
+    first = None
+    for i, d in enumerate(schedule):
+        row = BudgetItem(
+            household_id=hh.id,
+            name=name,
+            item_type=kind,
+            amount=float(item.amount),
+            is_income=False,
+            due_date=d,
+            frequency="monthly",
+            notes=f"From bank statement ({item.due_date.isoformat()} {float(item.amount):.2f})",
+            category=item.category or "",
+        )
+        db.add(row)
+        if first is None:
+            first = row
+    exists_name = (
+        db.query(ItemName).filter(ItemName.household_id == hh.id, ItemName.name == name).first()
+    )
+    if not exists_name:
+        db.add(ItemName(household_id=hh.id, name=name, kind=kind, is_default=False))
+    db.commit()
+    assert first is not None
+    db.refresh(first)
+    return {
+        "ok": True,
+        "created": True,
+        "item_id": first.id,
+        "due_date": due.isoformat(),
+        "message": f"Added {name} ({float(item.amount):.2f}) as a monthly {kind} starting {due.isoformat()}.",
+    }
+
+
+@app.get("/api/recurring")
+def list_recurring_series(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """One row per repeating bill/pay — for the Recurring tab."""
+    hh = get_household(db)
+    today = date.today()
+    ensure_recurring_through(db, hh.id, today.year, today.month, extra_months=2)
+    rows = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.frequency.in_(RECURRING),
+            BudgetItem.item_type.in_(REPEAT_TYPES),
+        )
+        .order_by(BudgetItem.due_date, BudgetItem.id)
+        .all()
+    )
+    groups: dict[tuple, list[BudgetItem]] = {}
+    for it in rows:
+        groups.setdefault(series_key(it), []).append(it)
+    out = []
+    for _key, bunch in groups.items():
+        bunch = sorted(bunch, key=lambda i: (i.due_date, i.id))
+        this_month = [
+            i
+            for i in bunch
+            if i.due_date.year == today.year and i.due_date.month == today.month
+        ]
+        upcoming = [i for i in bunch if i.due_date >= today]
+        this_it = this_month[0] if this_month else None
+        next_it = upcoming[0] if upcoming else bunch[-1]
+        later = [i for i in bunch if this_it is None or i.due_date > this_it.due_date]
+        typical = float((later[-1] if later else next_it).amount)
+        out.append(
+            {
+                "id": (this_it or next_it).id,
+                "this_month_id": this_it.id if this_it else None,
+                "next_id": next_it.id,
+                "name": next_it.name,
+                "item_type": next_it.item_type,
+                "frequency": next_it.frequency,
+                "category": next_it.category or "",
+                "is_income": bool(next_it.is_income),
+                "due_day": next_it.due_date.day,
+                "this_month_date": this_it.due_date.isoformat() if this_it else None,
+                "this_month_amount": float(this_it.amount) if this_it else None,
+                "this_month_paid": bool(this_it.is_paid) if this_it else False,
+                "next_date": next_it.due_date.isoformat(),
+                "typical_amount": typical,
+                "count": len(bunch),
+            }
+        )
+    out.sort(key=lambda r: ((r["due_day"] or 99), r["name"].lower()))
+    return {"items": out, "today": today.isoformat()}
+
+
 @app.patch("/api/items/{item_id}", response_model=BudgetItemOut)
 def update_item(
     item_id: int,
     body: BudgetItemUpdate,
+    scope: str = Query(default="this"),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
@@ -571,18 +804,13 @@ def update_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     data = body.model_dump(exclude_unset=True)
-    for k, v in data.items():
-        setattr(item, k, v)
-    if item.item_type == "paycheck":
-        item.is_income = True
-    db.commit()
-    db.refresh(item)
-    return item
+    return update_series(db, hh.id, item, data, scope=scope)
 
 
 @app.delete("/api/items/{item_id}")
 def delete_item(
     item_id: int,
+    scope: str = Query(default="this"),
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
@@ -594,9 +822,7 @@ def delete_item(
     )
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
-    db.delete(item)
-    db.commit()
-    return {"ok": True}
+    return delete_series(db, hh.id, item, scope=scope)
 
 
 @app.post("/api/items/{item_id}/toggle-paid", response_model=BudgetItemOut)
@@ -656,7 +882,7 @@ def copy_month(
         .all()
     )
     if only_recurring:
-        src_items = [i for i in src_items if i.frequency in ("weekly", "biweekly", "monthly")]
+        src_items = [i for i in src_items if i.frequency in ("weekly", "biweekly", "monthly", "yearly")]
 
     existing = (
         db.query(BudgetItem)
@@ -1053,10 +1279,27 @@ def metrics(
     )
 
     income = sum(i.amount for i in items if i.is_income)
-    expenses = sum(i.amount for i in items if not i.is_income)
+    expenses = sum(
+        i.amount for i in items if not i.is_income and i.item_type != "balance"
+    )
     estimates = sum(i.amount for i in items if i.item_type == "estimate")
     bills = sum(i.amount for i in items if i.item_type == "bill")
     actuals = sum(i.amount for i in items if i.item_type == "actual")
+    paid = sum(
+        i.amount
+        for i in items
+        if not i.is_income
+        and i.item_type != "balance"
+        and ((i.item_type == "bill" and i.is_paid) or i.item_type == "actual")
+    )
+    still_due = sum(
+        i.amount
+        for i in items
+        if not i.is_income
+        and (
+            (i.item_type == "bill" and not i.is_paid) or i.item_type == "estimate"
+        )
+    )
 
     by_category: dict[str, float] = {}
     by_type: dict[str, float] = {}
@@ -1073,10 +1316,88 @@ def metrics(
         month_estimates=round(estimates, 2),
         month_bills=round(bills, 2),
         month_actuals=round(actuals, 2),
+        month_paid=round(paid, 2),
+        month_still_due=round(still_due, 2),
         net=round(income - expenses, 2),
         by_category={k: round(v, 2) for k, v in sorted(by_category.items(), key=lambda x: -x[1])},
         by_type={k: round(v, 2) for k, v in by_type.items()},
     )
+
+
+@app.get("/api/subscriptions")
+def list_subscriptions(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    hh = get_household(db)
+    return summarize_subscriptions(db, hh.id)
+
+
+@app.post("/api/subscriptions")
+def create_subscription(
+    body: SubscriptionCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Add a repeating streaming / Apple / software bill."""
+    hh = get_household(db)
+    name = body.name.strip()[:120]
+    freq = body.frequency if body.frequency in ("monthly", "yearly", "weekly") else "monthly"
+    ahead = 2 if freq == "yearly" else 12
+    schedule = _repeat_dates(body.due_date, freq, months_ahead=ahead)
+    first: BudgetItem | None = None
+    for i, due in enumerate(schedule):
+        item = BudgetItem(
+            household_id=hh.id,
+            name=name,
+            item_type="bill",
+            amount=float(body.amount),
+            is_income=False,
+            due_date=due,
+            frequency=freq,
+            notes=body.notes or "Subscription",
+            category="Subscriptions",
+            is_subscription=True,
+        )
+        db.add(item)
+        if first is None:
+            first = item
+    exists = (
+        db.query(ItemName)
+        .filter(ItemName.household_id == hh.id, ItemName.name == name)
+        .first()
+    )
+    if not exists:
+        db.add(ItemName(household_id=hh.id, name=name, kind="bill", is_default=False))
+    db.commit()
+    assert first is not None
+    db.refresh(first)
+    return {
+        "ok": True,
+        "item_id": first.id,
+        "created_dates": len(schedule),
+        "message": f"Added {name} as a {freq} subscription.",
+    }
+
+
+@app.post("/api/subscriptions/ignore")
+def ignore_subscription(
+    name: str = Query(..., min_length=1),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Stop treating this name as a subscription (Apple.com/bill that is not a sub)."""
+    hh = get_household(db)
+    key = name.strip().lower()
+    rows = (
+        db.query(BudgetItem)
+        .filter(BudgetItem.household_id == hh.id, BudgetItem.is_income.is_(False))
+        .all()
+    )
+    updated = 0
+    for row in rows:
+        if (row.name or "").strip().lower() == key:
+            row.is_subscription = False
+            updated += 1
+    db.commit()
+    return {"ok": True, "updated": updated}
 
 
 @app.get("/api/upcoming", response_model=UpcomingResponse)
@@ -1092,6 +1413,7 @@ def upcoming(
             BudgetItem.household_id == hh.id,
             BudgetItem.due_date >= today,
             BudgetItem.is_paid == False,  # noqa: E712
+            BudgetItem.item_type.in_(("bill", "estimate", "paycheck")),
         )
         .order_by(BudgetItem.due_date, BudgetItem.id)
         .limit(50)
@@ -1183,12 +1505,119 @@ def delete_goal(
     return {"ok": True}
 
 
+def _plan_date(year: int, month: int) -> date:
+    today = date.today()
+    last = monthrange(year, month)[1]
+    if today.year == year and today.month == month:
+        return today
+    return date(year, month, 1)
+
+
+def _item_in_month(
+    db: Session, household_id: int, name: str, year: int, month: int
+) -> BudgetItem | None:
+    start = date(year, month, 1)
+    end = date(year, month, monthrange(year, month)[1])
+    return (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == household_id,
+            BudgetItem.name == name,
+            BudgetItem.due_date >= start,
+            BudgetItem.due_date <= end,
+        )
+        .first()
+    )
+
+
+@app.post("/api/goals/{goal_id}/to-calendar")
+def goal_to_calendar(
+    goal_id: int,
+    year: int = Query(default=None),
+    month: int = Query(default=None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Put this month's goal savings on the calendar as an estimate."""
+    today = date.today()
+    year = year or today.year
+    month = month or today.month
+    hh = get_household(db)
+    g = db.query(Goal).filter(Goal.id == goal_id, Goal.household_id == hh.id).first()
+    if not g:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    amount = float(g.monthly_contribution or 0)
+    if amount <= 0:
+        m = goal_metrics(g.target_amount, g.current_amount, g.target_date, g.monthly_contribution)
+        amount = float(m.get("suggested_monthly") or 0)
+    if amount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Set a monthly savings amount on this goal first.",
+        )
+    name = f"Goal: {g.name.strip()}"[:120]
+    existing = _item_in_month(db, hh.id, name, year, month)
+    if existing:
+        return {
+            "ok": True,
+            "created": False,
+            "item_id": existing.id,
+            "due_date": existing.due_date.isoformat(),
+            "message": f"{name} is already on {existing.due_date.isoformat()}.",
+        }
+    due = _plan_date(year, month)
+    item = BudgetItem(
+        household_id=hh.id,
+        name=name,
+        item_type="estimate",
+        amount=amount,
+        is_income=False,
+        due_date=due,
+        frequency="once",
+        notes="From Goals — this month's savings",
+        category="Goals",
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {
+        "ok": True,
+        "created": True,
+        "item_id": item.id,
+        "due_date": due.isoformat(),
+        "message": f"Added {name} ({amount:.2f}) on {due.isoformat()}.",
+    }
+
+
 # ── Debts + paydown plan ──────────────────────────────────────────
+
+def _debt_out(d: Debt, db: Session | None = None) -> DebtOut:
+    txn_count = 0
+    if db is not None:
+        txn_count = (
+            db.query(CardTransaction).filter(CardTransaction.debt_id == d.id).count()
+        )
+    return DebtOut(
+        id=d.id,
+        name=d.name,
+        balance=float(d.balance or 0),
+        apr=float(d.apr or 0),
+        min_payment=float(d.min_payment or 0),
+        notes=d.notes or "",
+        last4=getattr(d, "last4", "") or "",
+        due_date=getattr(d, "due_date", None),
+        statement_date=getattr(d, "statement_date", None),
+        last_interest=float(getattr(d, "last_interest", 0) or 0),
+        kind=getattr(d, "kind", None) or "card",
+        txn_count=txn_count,
+    )
+
 
 @app.get("/api/debts", response_model=list[DebtOut])
 def list_debts(user: User = Depends(current_user), db: Session = Depends(get_db)):
     hh = get_household(db)
-    return db.query(Debt).filter(Debt.household_id == hh.id).order_by(Debt.id).all()
+    rows = db.query(Debt).filter(Debt.household_id == hh.id).order_by(Debt.id).all()
+    return [_debt_out(d, db) for d in rows]
 
 
 @app.post("/api/debts", response_model=DebtOut)
@@ -1205,6 +1634,8 @@ def create_debt(
         apr=float(body.apr or 0),
         min_payment=float(body.min_payment or 0),
         notes=body.notes or "",
+        last4=(body.last4 or "").strip()[-4:],
+        kind=body.kind if body.kind in ("card", "loan") else "card",
     )
     db.add(d)
     db.commit()
@@ -1223,11 +1654,16 @@ def update_debt(
     d = db.query(Debt).filter(Debt.id == debt_id, Debt.household_id == hh.id).first()
     if not d:
         raise HTTPException(status_code=404, detail="Debt not found")
-    for k, v in body.model_dump(exclude_unset=True).items():
+    old_name = d.name
+    data = body.model_dump(exclude_unset=True)
+    if "last4" in data and data["last4"] is not None:
+        data["last4"] = str(data["last4"]).strip()[-4:]
+    for k, v in data.items():
         setattr(d, k, v)
     db.commit()
     db.refresh(d)
-    return d
+    _sync_card_min_bill(db, hh, d, old_name=old_name)
+    return _debt_out(d, db)
 
 
 @app.delete("/api/debts/{debt_id}")
@@ -1243,6 +1679,438 @@ def delete_debt(
     db.delete(d)
     db.commit()
     return {"ok": True}
+
+
+@app.post("/api/cards/preview")
+async def cards_preview(
+    file: UploadFile = File(...),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Read a credit-card PDF. Does not save. Does not touch the calendar."""
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty file")
+    try:
+        parsed = parse_card_pdf(raw)
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=f"Could not read card PDF: {ex}") from ex
+    hh = get_household(db)
+    last4 = (parsed.get("summary") or {}).get("last4") or ""
+    match = None
+    if last4:
+        match = (
+            db.query(Debt)
+            .filter(Debt.household_id == hh.id, Debt.last4 == last4)
+            .first()
+        )
+    if match is None:
+        name = (parsed.get("summary") or {}).get("card_name") or ""
+        if name:
+            match = (
+                db.query(Debt)
+                .filter(Debt.household_id == hh.id, Debt.name == name)
+                .first()
+            )
+    parsed["matched_debt_id"] = match.id if match else None
+    parsed["matched_debt_name"] = match.name if match else None
+    parsed["matched_apr"] = float(match.apr or 0) if match else None
+    parsed["matched_min_payment"] = float(match.min_payment or 0) if match else None
+    parsed["filename"] = file.filename or "statement.pdf"
+    return parsed
+
+
+def _dedupe_named_monthlies(db: Session, household_id: int, name: str) -> None:
+    """Keep one calendar copy per due date for a repeating bill name."""
+    rows = (
+        db.query(BudgetItem)
+        .filter(BudgetItem.household_id == household_id, BudgetItem.name == name)
+        .order_by(BudgetItem.due_date, BudgetItem.id)
+        .all()
+    )
+    seen: set[date] = set()
+    for row in rows:
+        if row.due_date in seen:
+            db.delete(row)
+        else:
+            seen.add(row.due_date)
+    db.commit()
+
+
+def _sync_card_min_bill(db: Session, hh: Household, debt: Debt, old_name: str | None = None) -> None:
+    """Keep the calendar 'Card min' bill in sync when you rename or change autopay."""
+    names = [f"Card min: {debt.name}"[:120]]
+    if old_name and old_name != debt.name:
+        names.append(f"Card min: {old_name}"[:120])
+    rows = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.name.in_(names),
+        )
+        .all()
+    )
+    if not rows:
+        return
+    new_name = f"Card min: {debt.name}"[:120]
+    due_day = debt.due_date.day if debt.due_date else None
+    for row in rows:
+        row.name = new_name
+        if debt.min_payment and float(debt.min_payment) > 0:
+            row.amount = float(debt.min_payment)
+        if due_day and row.due_date:
+            last = monthrange(row.due_date.year, row.due_date.month)[1]
+            row.due_date = date(row.due_date.year, row.due_date.month, min(due_day, last))
+    db.commit()
+    _dedupe_named_monthlies(db, hh.id, new_name)
+
+
+def _put_card_min_on_calendar(db: Session, hh: Household, debt: Debt) -> dict:
+    if not debt.min_payment or float(debt.min_payment) <= 0:
+        return {"created": False, "message": "No minimum payment to put on the calendar."}
+    due = debt.due_date or _plan_date(date.today().year, date.today().month)
+    name = f"Card min: {debt.name}"[:120]
+    year, month = due.year, due.month
+    existing = _item_in_month(db, hh.id, name, year, month)
+    if existing is None and (debt.last4 or ""):
+        start = date(year, month, 1)
+        end = date(year, month, monthrange(year, month)[1])
+        existing = (
+            db.query(BudgetItem)
+            .filter(
+                BudgetItem.household_id == hh.id,
+                BudgetItem.due_date >= start,
+                BudgetItem.due_date <= end,
+                BudgetItem.name.like("Card min:%"),
+                BudgetItem.name.like(f"%{debt.last4}%"),
+            )
+            .first()
+        )
+    if existing:
+        existing.name = name
+        existing.amount = float(debt.min_payment)
+        existing.due_date = due
+        existing.item_type = "bill"
+        existing.frequency = "monthly"
+        db.commit()
+        _dedupe_named_monthlies(db, hh.id, name)
+        return {
+            "created": False,
+            "item_id": existing.id,
+            "message": f"Updated {name} on the calendar ({float(debt.min_payment):.2f}).",
+        }
+    item = BudgetItem(
+        household_id=hh.id,
+        name=name,
+        item_type="bill",
+        amount=float(debt.min_payment),
+        is_income=False,
+        due_date=due,
+        frequency="monthly",
+        notes=f"Minimum payment from card statement · due {due.isoformat()}",
+        category="Debt",
+        is_subscription=False,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    _dedupe_named_monthlies(db, hh.id, name)
+    return {
+        "created": True,
+        "item_id": item.id,
+        "message": f"Added {name} ({float(debt.min_payment):.2f}) as a monthly bill.",
+    }
+
+
+@app.post("/api/cards/apply")
+def cards_apply(
+    body: CardApplyRequest,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Save statement totals onto a card (feeds Debt plan). Charges stay off the calendar."""
+    hh = get_household(db)
+    last4 = (body.last4 or "").strip()[-4:]
+    debt = None
+    if body.debt_id:
+        debt = db.query(Debt).filter(Debt.id == body.debt_id, Debt.household_id == hh.id).first()
+        if not debt:
+            raise HTTPException(status_code=404, detail="Card not found")
+    if debt is None and last4:
+        debt = db.query(Debt).filter(Debt.household_id == hh.id, Debt.last4 == last4).first()
+    if debt is None:
+        debt = Debt(
+            household_id=hh.id,
+            name=(body.name or "Chase card").strip()[:120],
+            balance=0.0,
+            apr=0.0,
+            min_payment=0.0,
+            kind="card",
+        )
+        db.add(debt)
+        db.flush()
+    debt.name = (body.name or debt.name).strip()[:120]
+    if last4:
+        debt.last4 = last4
+        if "…" not in debt.name and last4 not in debt.name:
+            debt.name = f"{debt.name} …{last4}"[:120]
+    debt.balance = float(body.new_balance)
+    if body.apr and body.apr > 0:
+        debt.apr = float(body.apr)
+    if body.min_payment and body.min_payment >= 0:
+        debt.min_payment = float(body.min_payment)
+    debt.due_date = body.due_date
+    debt.statement_date = body.statement_date
+    debt.last_interest = float(body.last_interest or 0)
+    debt.kind = "card"
+    extra = f"Statement {body.statement_date.isoformat()}" if body.statement_date else "Card statement"
+    debt.notes = extra[:500]
+
+    added = 0
+    existing_keys = {
+        (t.txn_date.isoformat(), round(float(t.amount), 2), (t.description or "").strip().lower()[:80])
+        for t in db.query(CardTransaction).filter(CardTransaction.debt_id == debt.id).all()
+    }
+    for row in body.transactions:
+        key = (
+            row.date.isoformat(),
+            round(float(row.amount), 2),
+            (row.description or "").strip().lower()[:80],
+        )
+        if key in existing_keys:
+            continue
+        db.add(
+            CardTransaction(
+                household_id=hh.id,
+                debt_id=debt.id,
+                txn_date=row.date,
+                description=(row.description or "")[:200],
+                amount=float(row.amount),
+                is_credit=bool(row.is_credit),
+                category=(row.category or "")[:64],
+            )
+        )
+        existing_keys.add(key)
+        added += 1
+    db.commit()
+    db.refresh(debt)
+
+    cal_msg = ""
+    if body.put_min_on_calendar:
+        cal = _put_card_min_on_calendar(db, hh, debt)
+        cal_msg = " " + cal.get("message", "")
+
+    stored = (
+        db.query(CardTransaction)
+        .filter(CardTransaction.debt_id == debt.id)
+        .order_by(CardTransaction.txn_date)
+        .all()
+    )
+    recurring = find_recurring_charges(
+        [
+            {
+                "date": t.txn_date.isoformat(),
+                "description": t.description,
+                "amount": t.amount,
+                "is_credit": t.is_credit,
+                "category": t.category,
+            }
+            for t in stored
+        ]
+    )
+    return {
+        "ok": True,
+        "debt": _debt_out(debt, db),
+        "added_transactions": added,
+        "recurring": recurring,
+        "message": (
+            f"Saved {debt.name}: balance ${float(debt.balance):,.2f}, "
+            f"APR {float(debt.apr):g}%, min ${float(debt.min_payment):,.2f}."
+            f"{cal_msg} Charges stay on Cards — not on the calendar."
+        ),
+    }
+
+
+@app.get("/api/cards")
+def list_cards(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    hh = get_household(db)
+    rows = (
+        db.query(Debt)
+        .filter(Debt.household_id == hh.id)
+        .order_by(Debt.id)
+        .all()
+    )
+    cards = []
+    all_recurring = []
+    for d in rows:
+        txns = (
+            db.query(CardTransaction)
+            .filter(CardTransaction.debt_id == d.id)
+            .order_by(CardTransaction.txn_date.desc())
+            .all()
+        )
+        rec = find_recurring_charges(
+            [
+                {
+                    "date": t.txn_date.isoformat(),
+                    "description": t.description,
+                    "amount": t.amount,
+                    "is_credit": t.is_credit,
+                    "category": t.category,
+                }
+                for t in txns
+            ]
+        )
+        for r in rec:
+            r["debt_id"] = d.id
+            r["card_name"] = d.name
+            r["hidden"] = False
+        all_recurring.extend(rec)
+        cards.append(
+            {
+                **_debt_out(d, db).model_dump(),
+                "recent": [
+                    {
+                        "date": t.txn_date.isoformat(),
+                        "description": t.description,
+                        "amount": t.amount,
+                        "is_credit": t.is_credit,
+                        "category": t.category,
+                    }
+                    for t in txns[:12]
+                ],
+                "recurring": rec,
+            }
+        )
+    marks = {
+        (m.merchant_key or "").strip().upper(): (m.status or "ignore")
+        for m in db.query(CardRecurringMark).filter(CardRecurringMark.household_id == hh.id).all()
+    }
+    cal_names = {
+        (i.name or "")
+        for i in db.query(BudgetItem)
+        .filter(BudgetItem.household_id == hh.id, BudgetItem.name.like("Card: %"))
+        .all()
+    }
+    for r in all_recurring:
+        key = (r.get("key") or "").strip().upper()
+        r["hidden"] = marks.get(key) == "ignore"
+        r["on_calendar"] = f"Card: {r.get('merchant')}" in cal_names
+    all_recurring.sort(key=lambda r: (-r.get("count", 0), -r.get("typical_amount", 0)))
+    return {
+        "cards": cards,
+        "recurring": all_recurring,
+        "total_balance": round(sum(float(c["balance"] or 0) for c in cards), 2),
+        "total_min": round(sum(float(c["min_payment"] or 0) for c in cards), 2),
+    }
+
+
+@app.post("/api/cards/{debt_id}/min-to-calendar")
+def card_min_to_calendar(
+    debt_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    hh = get_household(db)
+    d = db.query(Debt).filter(Debt.id == debt_id, Debt.household_id == hh.id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return _put_card_min_on_calendar(db, hh, d)
+
+
+@app.post("/api/cards/recurring/mark")
+def mark_recurring(
+    key: str = Query(..., min_length=1),
+    status: str = Query(default="ignore"),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Hide (ignore) or restore (watch) a spotted merchant."""
+    hh = get_household(db)
+    k = key.strip().upper()
+    st = "watch" if (status or "").lower() == "watch" else "ignore"
+    row = (
+        db.query(CardRecurringMark)
+        .filter(CardRecurringMark.household_id == hh.id, CardRecurringMark.merchant_key == k)
+        .first()
+    )
+    if st == "watch":
+        if row:
+            db.delete(row)
+            db.commit()
+        return {"ok": True, "status": "watch"}
+    if row:
+        row.status = "ignore"
+    else:
+        db.add(CardRecurringMark(household_id=hh.id, merchant_key=k, status="ignore"))
+    db.commit()
+    return {"ok": True, "status": "ignore"}
+
+
+@app.post("/api/cards/recurring/remove-calendar")
+def recurring_remove_calendar(
+    merchant: str = Query(..., min_length=1),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    hh = get_household(db)
+    name = f"Card: {merchant.strip()}"[:120]
+    rows = (
+        db.query(BudgetItem)
+        .filter(BudgetItem.household_id == hh.id, BudgetItem.name == name)
+        .all()
+    )
+    n = 0
+    for row in rows:
+        db.delete(row)
+        n += 1
+    db.commit()
+    return {"ok": True, "deleted": n, "message": f"Removed {name} from the calendar." if n else "Nothing to remove."}
+
+
+@app.post("/api/cards/recurring/to-calendar")
+def recurring_to_calendar(
+    merchant: str = Query(..., min_length=1),
+    amount: float = Query(..., gt=0),
+    year: int = Query(default=None),
+    month: int = Query(default=None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Put a spotted card recurring charge on the calendar as a monthly estimate."""
+    today = date.today()
+    year = year or today.year
+    month = month or today.month
+    hh = get_household(db)
+    name = f"Card: {merchant.strip()}"[:120]
+    existing = _item_in_month(db, hh.id, name, year, month)
+    if existing:
+        return {
+            "ok": True,
+            "created": False,
+            "message": f"{name} is already on {existing.due_date.isoformat()}.",
+        }
+    due = _plan_date(year, month)
+    item = BudgetItem(
+        household_id=hh.id,
+        name=name,
+        item_type="estimate",
+        amount=float(amount),
+        is_income=False,
+        due_date=due,
+        frequency="monthly",
+        notes="Spotted on a credit-card statement (recurring)",
+        category="Subscriptions",
+        is_subscription=True,
+    )
+    db.add(item)
+    db.commit()
+    return {
+        "ok": True,
+        "created": True,
+        "due_date": due.isoformat(),
+        "message": f"Added {name} ({float(amount):.2f}/mo) to the calendar.",
+    }
 
 
 @app.post("/api/debts/plan", response_model=DebtPlanSummary)
@@ -1274,6 +2142,54 @@ def debt_plan(
         plan_months=plan.get("months"),
     )
     return DebtPlanSummary(**plan)
+
+
+@app.post("/api/debts/extra-to-calendar")
+def debt_extra_to_calendar(
+    extra_monthly: float = Query(..., gt=0),
+    year: int = Query(default=None),
+    month: int = Query(default=None),
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Put this month's extra debt payment on the calendar as a bill."""
+    today = date.today()
+    year = year or today.year
+    month = month or today.month
+    hh = get_household(db)
+    amount = round(float(extra_monthly), 2)
+    name = "Debt extra payment"
+    existing = _item_in_month(db, hh.id, name, year, month)
+    if existing:
+        return {
+            "ok": True,
+            "created": False,
+            "item_id": existing.id,
+            "due_date": existing.due_date.isoformat(),
+            "message": f"{name} is already on {existing.due_date.isoformat()}.",
+        }
+    due = _plan_date(year, month)
+    item = BudgetItem(
+        household_id=hh.id,
+        name=name,
+        item_type="bill",
+        amount=amount,
+        is_income=False,
+        due_date=due,
+        frequency="once",
+        notes="From Debt plan — extra beyond minimums",
+        category="Debt",
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {
+        "ok": True,
+        "created": True,
+        "item_id": item.id,
+        "due_date": due.isoformat(),
+        "message": f"Added {name} ({amount:.2f}) on {due.isoformat()}.",
+    }
 
 
 # ── Investments (simple buckets) ──────────────────────────────────
@@ -1390,6 +2306,7 @@ def snapshot(user: User = Depends(current_user), db: Session = Depends(get_db)):
         .first()
     )
     cash = float(anchor.amount) if anchor else float(hh.starting_balance)
+    cash_as_of = anchor.due_date if anchor else None
 
     invs = db.query(Investment).filter(Investment.household_id == hh.id).all()
     debts = db.query(Debt).filter(Debt.household_id == hh.id).all()
@@ -1405,6 +2322,7 @@ def snapshot(user: User = Depends(current_user), db: Session = Depends(get_db)):
     return SnapshotOut(
         household_name=hh.name,
         cash=round(cash, 2),
+        cash_as_of=cash_as_of,
         investments_total=round(inv_total, 2),
         debts_total=round(debt_total, 2),
         goals_saved=round(goals_saved, 2),
@@ -1652,6 +2570,73 @@ def paystub_apply(
     }
 
 
+@app.post("/api/jobs/{job_id}/to-calendar")
+def job_to_calendar(
+    job_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Put this job's net pay on the calendar (this month onward)."""
+    hh = get_household(db)
+    job = db.query(JobPay).filter(JobPay.id == job_id, JobPay.household_id == hh.id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    freq = job.frequency if job.frequency in RECURRING else "biweekly"
+    name = " · ".join(p for p in [(job.employee_label or "").strip(), (job.employer or "").strip()] if p)
+    name = (name or "Paycheck")[:120]
+    existing = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.name == name,
+            BudgetItem.item_type == "paycheck",
+            BudgetItem.frequency == freq,
+        )
+        .first()
+    )
+    if existing:
+        return {
+            "ok": True,
+            "created": False,
+            "message": f"{name} is already on the calendar as {freq} pay.",
+        }
+    last = job.last_pay_date or date.today()
+    start = next_after(last, freq) or (last + timedelta(days=14))
+    month_start = date.today().replace(day=1)
+    guard = 0
+    while start < month_start and guard < 40:
+        start = next_after(start, freq) or (start + timedelta(days=14))
+        guard += 1
+    schedule = _repeat_dates(start, freq, months_ahead=12)
+    first = None
+    for i, due in enumerate(schedule):
+        row = BudgetItem(
+            household_id=hh.id,
+            name=name,
+            item_type="paycheck",
+            amount=float(job.net_pay),
+            is_income=True,
+            due_date=due,
+            frequency=freq,
+            notes=f"From job profile · {freq}",
+            category="Income",
+        )
+        db.add(row)
+        if first is None:
+            first = row
+    db.commit()
+    return {
+        "ok": True,
+        "created": True,
+        "count": len(schedule),
+        "first_date": start.isoformat(),
+        "message": (
+            f"Added {name} ${float(job.net_pay):,.2f} {freq} starting {start.isoformat()} "
+            f"({len(schedule)} paydays). Shows as income on Home."
+        ),
+    }
+
+
 @app.get("/api/jobs", response_model=list[JobPayOut])
 def list_jobs(user: User = Depends(current_user), db: Session = Depends(get_db)):
     hh = get_household(db)
@@ -1807,14 +2792,23 @@ async def import_statement(
                     frequency="once",
                     notes=f"Imported ({label} {fmt})",
                     category=r.category or ("Income" if r.is_income else "Other"),
+                    is_subscription=(
+                        True
+                        if (r.category or "") == "Subscriptions"
+                        or looks_like_subscription(r.description, r.category or "")
+                        else None
+                    ),
                 )
             )
             imported += 1
         db.commit()
 
     bank_label = BANK_PRESETS.get(detected, detected)
-    if is_pdf and detected == "chase":
-        bank_label = "Chase (PDF statement)"
+    req_bank = (bank or "").lower()
+    if req_bank == "chase_credit":
+        bank_label = "Chase credit card"
+    elif is_pdf and detected == "chase":
+        bank_label = "Chase checking PDF"
     if commit:
         if imported:
             range_txt = ""
@@ -1881,6 +2875,8 @@ def import_commit(
         if cat not in IMPORT_CATEGORIES:
             cat = "Other" if not is_income else "Income"
 
+        src = (getattr(r, "source", None) or "").strip()
+        note = f"Imported ({src})" if src else f"Imported ({label})"
         db.add(
             BudgetItem(
                 household_id=hh.id,
@@ -1890,8 +2886,13 @@ def import_commit(
                 is_income=is_income,
                 due_date=r.date,
                 frequency="once",
-                notes=f"Imported ({label})",
+                notes=note[:500],
                 category=cat,
+                is_subscription=(
+                    True
+                    if cat == "Subscriptions" or looks_like_subscription(r.description.strip(), cat)
+                    else None
+                ),
             )
         )
         dates.append(r.date)

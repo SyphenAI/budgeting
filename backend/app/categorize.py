@@ -47,7 +47,36 @@ def suggest_category(description: str, is_income: bool) -> str:
         ("Transfer", ("online transfer", "trnsfer", "transfer to", "zelle payment to", "paypal")),
         ("Savings / Investment", ("fidelity", "vanguard", "schwab", "moneyline", "brokerage", "robinhood")),
         ("Medical", ("pharmacy", "cvs", "walgreens", "hospital", "clinic", "dental", "health")),
-        ("Subscriptions", ("netflix", "spotify", "hulu", "disney", "prime video", "apple.com/bill")),
+        (
+            "Subscriptions",
+            (
+                "netflix",
+                "spotify",
+                "hulu",
+                "disney+",
+                "disney plus",
+                "prime video",
+                "amazon prime",
+                "apple.com/bill",
+                "itunes.com",
+                "icloud",
+                "app store",
+                "youtube premium",
+                "hbo max",
+                "max.com",
+                "paramount+",
+                "peacock",
+                "adobe",
+                "microsoft 365",
+                "office 365",
+                "chatgpt",
+                "openai",
+                "playstation plus",
+                "xbox game pass",
+                "audible",
+                "sirius",
+            ),
+        ),
         ("Kids", ("school", "daycare", "childcare", "toys")),
         ("Fees", ("fee", "service charge", "overdraft", "nsf")),
         ("Shopping", ("amazon", "amzn", "ebay", "etsy")),
@@ -75,6 +104,83 @@ def is_credit_card_category(category: str, description: str = "") -> bool:
             "synchrony bank",
         )
     )
+
+
+# Apple / streaming / software — people miss these because they hide in card charges.
+SUBSCRIPTION_KEYS = (
+    "netflix",
+    "spotify",
+    "hulu",
+    "disney+",
+    "disney plus",
+    "prime video",
+    "amazon prime",
+    "apple.com",
+    "apple.com/bill",
+    "apple tv",
+    "itunes",
+    "icloud",
+    "app store",
+    "youtube premium",
+    "youtubepremium",
+    "hbo",
+    "max.com",
+    "paramount",
+    "peacock",
+    "adobe",
+    "microsoft 365",
+    "office 365",
+    "google one",
+    "dropbox",
+    "chatgpt",
+    "openai",
+    "playstation",
+    "xbox game pass",
+    "nintendo",
+    "crunchyroll",
+    "espn+",
+    "fubo",
+    "sling",
+    "sirius",
+    "audible",
+    "kindle unlimited",
+    "nytimes",
+    "new york times",
+    "washington post",
+    "patreon",
+    "canva",
+    "grammarly",
+    "notion",
+    "icloud+",
+    "apple one",
+    "apple music",
+    "apple arcade",
+    "apple fitness",
+    "apple news",
+    "streaming",
+    "subscription",
+)
+
+
+def looks_like_subscription(name: str, category: str = "", notes: str = "") -> bool:
+    blob = f"{name or ''} {category or ''} {notes or ''}".lower()
+    if "subscription" in blob or "streaming" in blob:
+        return True
+    return any(k in blob for k in SUBSCRIPTION_KEYS)
+
+
+def monthly_subscription_amount(amount: float, frequency: str) -> float:
+    amt = max(float(amount or 0), 0.0)
+    freq = (frequency or "once").lower()
+    if freq == "weekly":
+        return round(amt * 52 / 12, 2)
+    if freq == "biweekly":
+        return round(amt * 26 / 12, 2)
+    if freq in ("yearly", "annual", "annually"):
+        return round(amt / 12, 2)
+    if freq == "monthly":
+        return round(amt, 2)
+    return round(amt, 2)
 
 
 def suggest_card_name(description: str) -> str:

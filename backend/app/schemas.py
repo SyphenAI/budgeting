@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 ItemType = Literal["bill", "estimate", "paycheck", "actual", "balance"]
-Frequency = Literal["once", "weekly", "biweekly", "monthly"]
+Frequency = Literal["once", "weekly", "biweekly", "monthly", "yearly"]
 
 
 class LoginRequest(BaseModel):
@@ -89,6 +89,7 @@ class BudgetItemOut(BaseModel):
     notes: str
     is_paid: bool
     category: str
+    is_subscription: Optional[bool] = None
 
     class Config:
         from_attributes = True
@@ -105,6 +106,7 @@ class BudgetItemCreate(BaseModel):
     is_paid: bool = False
     category: str = ""
     retain_name: bool = True
+    is_subscription: Optional[bool] = None
 
 
 class BudgetItemUpdate(BaseModel):
@@ -117,6 +119,7 @@ class BudgetItemUpdate(BaseModel):
     notes: Optional[str] = None
     is_paid: Optional[bool] = None
     category: Optional[str] = None
+    is_subscription: Optional[bool] = None
 
 
 class CalendarDay(BaseModel):
@@ -157,6 +160,8 @@ class MetricsResponse(BaseModel):
     month_estimates: float
     month_bills: float
     month_actuals: float
+    month_paid: float = 0.0
+    month_still_due: float = 0.0
     net: float
     by_category: dict[str, float]
     by_type: dict[str, float]
@@ -197,6 +202,7 @@ class ImportCommitRow(BaseModel):
     is_income: bool = False
     category: str = "Other"
     item_type: str = "actual"  # actual | paycheck
+    source: str = ""
 
 
 class ImportDebtLink(BaseModel):
@@ -272,6 +278,8 @@ class DebtCreate(BaseModel):
     apr: float = Field(default=0, ge=0)
     min_payment: float = Field(default=0, ge=0)
     notes: str = ""
+    last4: str = ""
+    kind: str = "card"
 
 
 class DebtUpdate(BaseModel):
@@ -280,6 +288,9 @@ class DebtUpdate(BaseModel):
     apr: Optional[float] = None
     min_payment: Optional[float] = None
     notes: Optional[str] = None
+    last4: Optional[str] = None
+    due_date: Optional[Date] = None
+    kind: Optional[str] = None
 
 
 class DebtOut(BaseModel):
@@ -289,9 +300,37 @@ class DebtOut(BaseModel):
     apr: float
     min_payment: float
     notes: str
+    last4: str = ""
+    due_date: Optional[Date] = None
+    statement_date: Optional[Date] = None
+    last_interest: float = 0.0
+    kind: str = "card"
+    txn_count: int = 0
 
     class Config:
         from_attributes = True
+
+
+class CardTxnIn(BaseModel):
+    date: Date
+    description: str = ""
+    amount: float = Field(gt=0)
+    is_credit: bool = False
+    category: str = ""
+
+
+class CardApplyRequest(BaseModel):
+    debt_id: Optional[int] = None
+    name: str = "Chase card"
+    last4: str = ""
+    new_balance: float = Field(ge=0)
+    apr: float = Field(default=0, ge=0)
+    min_payment: float = Field(default=0, ge=0)
+    due_date: Optional[Date] = None
+    statement_date: Optional[Date] = None
+    last_interest: float = Field(default=0, ge=0)
+    transactions: list[CardTxnIn] = []
+    put_min_on_calendar: bool = True
 
 
 class DebtPlanRequest(BaseModel):
@@ -374,6 +413,7 @@ class SnapshotOut(BaseModel):
 
     household_name: str
     cash: float  # latest bank balance anchor or starting balance
+    cash_as_of: Optional[Date] = None
     investments_total: float
     debts_total: float
     goals_saved: float
@@ -405,6 +445,14 @@ class MemberCreate(BaseModel):
     # member = money edits; viewer = read-only
     role: RoleName = "partner"
     require_password_change: bool = False
+
+
+class SubscriptionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    amount: float = Field(gt=0)
+    due_date: Date
+    frequency: Literal["monthly", "yearly", "weekly"] = "monthly"
+    notes: str = ""
 
 
 # ── Pay stub / job pay ─────────────────────────────────────────────

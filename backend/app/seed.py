@@ -19,6 +19,19 @@ DEFAULT_NAMES = [
     ("Childcare", "bill"),
     ("Credit card", "bill"),
     ("Streaming", "bill"),
+    ("Apple (iCloud / App Store)", "bill"),
+    ("Netflix", "bill"),
+    ("Spotify", "bill"),
+    ("YouTube Premium", "bill"),
+    ("Amazon Prime", "bill"),
+    ("Disney+", "bill"),
+    ("Hulu", "bill"),
+    ("Max (HBO)", "bill"),
+    ("Apple TV+", "bill"),
+    ("iCloud+", "bill"),
+    ("Adobe", "bill"),
+    ("Microsoft 365", "bill"),
+    ("Gym / membership", "bill"),
     ("Food", "estimate"),
     ("Gas", "estimate"),
     ("Kids activities", "estimate"),
@@ -83,3 +96,41 @@ def seed_if_empty(db: Session) -> None:
         )
 
     db.commit()
+
+
+EXTRA_SUB_NAMES = [
+    ("Apple (iCloud / App Store)", "bill"),
+    ("Netflix", "bill"),
+    ("Spotify", "bill"),
+    ("YouTube Premium", "bill"),
+    ("Amazon Prime", "bill"),
+    ("Disney+", "bill"),
+    ("Hulu", "bill"),
+    ("Max (HBO)", "bill"),
+    ("Apple TV+", "bill"),
+    ("iCloud+", "bill"),
+    ("Adobe", "bill"),
+    ("Microsoft 365", "bill"),
+    ("Gym / membership", "bill"),
+    ("Streaming", "bill"),
+]
+
+
+def ensure_subscription_names(db: Session) -> None:
+    """Add common streaming names on existing installs (no duplicates)."""
+    hh = db.query(Household).first()
+    if not hh:
+        return
+    existing = {
+        (n.name or "").strip().lower()
+        for n in db.query(ItemName).filter(ItemName.household_id == hh.id).all()
+    }
+    added = 0
+    for name, kind in EXTRA_SUB_NAMES:
+        if name.strip().lower() in existing:
+            continue
+        db.add(ItemName(household_id=hh.id, name=name, kind=kind, is_default=True))
+        existing.add(name.strip().lower())
+        added += 1
+    if added:
+        db.commit()

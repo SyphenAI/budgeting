@@ -82,10 +82,14 @@ class BudgetItem(Base):
     amount: Mapped[float] = mapped_column(Float)
     is_income: Mapped[bool] = mapped_column(Boolean, default=False)
     due_date: Mapped[date] = mapped_column(Date, index=True)
-    frequency: Mapped[str] = mapped_column(String(32), default="once")  # once|weekly|biweekly|monthly
+    frequency: Mapped[str] = mapped_column(String(32), default="once")  # once|weekly|biweekly|monthly|yearly
     notes: Mapped[str] = mapped_column(Text, default="")
     is_paid: Mapped[bool] = mapped_column(Boolean, default=False)
     category: Mapped[str] = mapped_column(String(64), default="")
+    # None = guess from name; True = subscription; False = not a subscription
+    is_subscription: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
+    # If set, auto-repeat stops after this date (this-and-later delete).
+    repeat_until: Mapped[date | None] = mapped_column(Date, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     household: Mapped[Household] = relationship(back_populates="items")
@@ -121,9 +125,48 @@ class Debt(Base):
     apr: Mapped[float] = mapped_column(Float, default=0.0)  # annual % e.g. 22.9
     min_payment: Mapped[float] = mapped_column(Float, default=0.0)
     notes: Mapped[str] = mapped_column(Text, default="")
+    last4: Mapped[str] = mapped_column(String(8), default="")
+    due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    statement_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    last_interest: Mapped[float] = mapped_column(Float, default=0.0)
+    kind: Mapped[str] = mapped_column(String(16), default="card")  # card | loan
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     household: Mapped[Household] = relationship(back_populates="debts")
+    transactions: Mapped[list["CardTransaction"]] = relationship(
+        back_populates="debt", cascade="all, delete-orphan"
+    )
+
+
+class CardTransaction(Base):
+    """Charges from a credit-card statement — not calendar bills."""
+
+    __tablename__ = "card_transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"), index=True)
+    debt_id: Mapped[int] = mapped_column(ForeignKey("debts.id"), index=True)
+    txn_date: Mapped[date] = mapped_column(Date, index=True)
+    description: Mapped[str] = mapped_column(String(200), default="")
+    amount: Mapped[float] = mapped_column(Float)
+    is_credit: Mapped[bool] = mapped_column(Boolean, default=False)  # payment/refund
+    category: Mapped[str] = mapped_column(String(64), default="")
+    raw: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    debt: Mapped[Debt] = relationship(back_populates="transactions")
+
+
+class CardRecurringMark(Base):
+    """Hide or keep a spotted card merchant (not a real repeating charge)."""
+
+    __tablename__ = "card_recurring_marks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"), index=True)
+    merchant_key: Mapped[str] = mapped_column(String(120), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="ignore")  # ignore | watch
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class JobPay(Base):
