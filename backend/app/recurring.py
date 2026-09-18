@@ -84,16 +84,18 @@ def ensure_recurring_through(
         if freq not in RECURRING:
             continue
         monthly_day = latest.due_date.day
+        series_start = items_sorted[0].due_date
         stop = None
         for it in items_sorted:
             ru = getattr(it, "repeat_until", None)
             if ru:
                 stop = ru if stop is None else max(stop, ru)
 
-        # This viewed month always gets a copy at the current amount (house, water, VA).
+        # Fill this viewed month, but never before the first date you set
+        # (first Gartner payday Oct 16 must not reappear in September).
         if freq == "monthly":
             due = date(year, month, min(monthly_day, month_end.day))
-            if not (stop and due > stop):
+            if due >= series_start and not (stop and due > stop):
                 key = ((latest.name or "").strip().lower(), latest.item_type, due)
                 if key not in existing_dates:
                     db.add(
@@ -115,11 +117,11 @@ def ensure_recurring_through(
                     created += 1
         elif freq in ("weekly", "biweekly"):
             step = 14 if freq == "biweekly" else 7
-            cur = items_sorted[0].due_date
-            while cur > month_start:
-                cur -= timedelta(days=step)
+            cur = series_start
+            while cur < month_start:
+                cur += timedelta(days=step)
             while cur <= month_end:
-                if month_start <= cur <= month_end and not (stop and cur > stop):
+                if cur >= series_start and not (stop and cur > stop):
                     key = ((latest.name or "").strip().lower(), latest.item_type, cur)
                     if key not in existing_dates:
                         db.add(
