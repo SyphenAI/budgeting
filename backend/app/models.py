@@ -111,6 +111,25 @@ class Goal(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     household: Mapped[Household] = relationship(back_populates="goals")
+    saves: Mapped[list["GoalSave"]] = relationship(
+        back_populates="goal", cascade="all, delete-orphan"
+    )
+
+
+class GoalSave(Base):
+    """One month's deposit toward a goal (manual tracker)."""
+
+    __tablename__ = "goal_saves"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    household_id: Mapped[int] = mapped_column(ForeignKey("households.id"), index=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id"), index=True)
+    saved_on: Mapped[date] = mapped_column(Date, index=True)
+    amount: Mapped[float] = mapped_column(Float)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    goal: Mapped[Goal] = relationship(back_populates="saves")
 
 
 class Debt(Base):

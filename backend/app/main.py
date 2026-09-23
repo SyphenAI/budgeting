@@ -24,6 +24,7 @@ from .models import (
     CardTransaction,
     Debt,
     Goal,
+    GoalSave,
     Household,
     Investment,
     ItemName,
@@ -51,6 +52,7 @@ from .schemas import (
     DebtPlanSummary,
     DebtUpdate,
     GoalCreate,
+    GoalSaveCreate,
     GoalOut,
     GoalUpdate,
     HouseholdOut,
@@ -89,7 +91,8 @@ from .categorize import (
 )
 from .seed import ensure_subscription_names, seed_if_empty
 from .subscriptions import summarize_subscriptions
-from .card_statement import find_recurring_charges, parse_card_pdf
+from .card_statement import analyze_card_spend, find_recurring_charges, parse_card_pdf
+from .categorize import suggest_category
 from .recurring import (
     RECURRING,
     REPEAT_TYPES,
@@ -1304,7 +1307,7 @@ def metrics(
     by_category: dict[str, float] = {}
     by_type: dict[str, float] = {}
     for i in items:
-        if i.is_income:
+        if i.is_income or i.item_type == "balance":
             continue
         cat = i.category or i.name or "Other"
         by_category[cat] = by_category.get(cat, 0) + float(i.amount)
@@ -1424,8 +1427,30 @@ def upcoming(
 
 # ── Goals ─────────────────────────────────────────────────────────
 
-def _goal_out(g: Goal) -> GoalOut:
+def _goal_out(g: Goal, db: Session | None = None) -> GoalOut:
     m = goal_metrics(g.target_amount, g.current_amount, g.target_date, g.monthly_contribution)
+    saves = []
+    saved_this_month = 0.0
+    if db is not None:
+        rows = (
+            db.query(GoalSave)
+            .filter(GoalSave.goal_id == g.id)
+            .order_by(GoalSave.saved_on.desc(), GoalSave.id.desc())
+            .limit(36)
+            .all()
+        )
+        today = date.today()
+        for s in rows:
+            saves.append(
+                {
+                    "id": s.id,
+                    "saved_on": s.saved_on,
+                    "amount": float(s.amount),
+                    "note": s.note or "",
+                }
+            )
+            if s.saved_on.year == today.year and s.saved_on.month == today.month:
+                saved_this_month += float(s.amount)
     return GoalOut(
         id=g.id,
         name=g.name,
@@ -1440,6 +1465,8 @@ def _goal_out(g: Goal) -> GoalOut:
         suggested_monthly=m["suggested_monthly"],
         eta_date=m["eta_date"],
         on_track=m["on_track"],
+        saved_this_month=round(saved_this_month, 2),
+        saves=saves,
     )
 
 
@@ -1447,7 +1474,7 @@ def _goal_out(g: Goal) -> GoalOut:
 def list_goals(user: User = Depends(current_user), db: Session = Depends(get_db)):
     hh = get_household(db)
     rows = db.query(Goal).filter(Goal.household_id == hh.id).order_by(Goal.id).all()
-    return [_goal_out(g) for g in rows]
+    return [_goal_out(g, db) for g in rows]
 
 
 @app.post("/api/goals", response_model=GoalOut)
@@ -1467,9 +1494,14 @@ def create_goal(
         notes=body.notes or "",
     )
     db.add(g)
+    db.flush()
+    if float(g.monthly_contribution or 0) <= 0 and g.target_date:
+        m = goal_metrics(g.target_amount, g.current_amount, g.target_date, 0)
+        if m.get("suggested_monthly"):
+            g.monthly_contribution = float(m["suggested_monthly"])
     db.commit()
     db.refresh(g)
-    return _goal_out(g)
+    return _goal_out(g, db)
 
 
 @app.patch("/api/goals/{goal_id}", response_model=GoalOut)
@@ -1487,7 +1519,39 @@ def update_goal(
         setattr(g, k, v)
     db.commit()
     db.refresh(g)
-    return _goal_out(g)
+    return _goal_out(g, db)
+
+
+@app.post("/api/goals/{goal_id}/saves")
+def log_goal_save(
+    goal_id: int,
+    body: GoalSaveCreate,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    """Log 'I saved this much this month' and add it to the goal total."""
+    hh = get_household(db)
+    g = db.query(Goal).filter(Goal.id == goal_id, Goal.household_id == hh.id).first()
+    if not g:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    today = date.today()
+    year = body.year or today.year
+    month = body.month or today.month
+    saved_on = date(year, month, 1)
+    amt = round(float(body.amount), 2)
+    db.add(
+        GoalSave(
+            household_id=hh.id,
+            goal_id=g.id,
+            saved_on=saved_on,
+            amount=amt,
+            note=(body.note or "")[:200],
+        )
+    )
+    g.current_amount = round(float(g.current_amount or 0) + amt, 2)
+    db.commit()
+    db.refresh(g)
+    return _goal_out(g, db)
 
 
 @app.delete("/api/goals/{goal_id}")
@@ -1636,11 +1700,14 @@ def create_debt(
         notes=body.notes or "",
         last4=(body.last4 or "").strip()[-4:],
         kind=body.kind if body.kind in ("card", "loan") else "card",
+        due_date=body.due_date,
     )
     db.add(d)
     db.commit()
     db.refresh(d)
-    return d
+    if body.put_min_on_calendar and float(d.min_payment or 0) > 0:
+        _put_card_min_on_calendar(db, hh, d)
+    return _debt_out(d, db)
 
 
 @app.patch("/api/debts/{debt_id}", response_model=DebtOut)
@@ -1931,6 +1998,63 @@ def cards_apply(
     }
 
 
+@app.get("/api/cards/spend")
+def card_spend(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Spending across every uploaded card statement (no bank login)."""
+    hh = get_household(db)
+    rows = (
+        db.query(CardTransaction, Debt)
+        .join(Debt, Debt.id == CardTransaction.debt_id)
+        .filter(CardTransaction.household_id == hh.id)
+        .all()
+    )
+    payload = []
+    for t, d in rows:
+        desc = t.description or ""
+        cat = t.category or ""
+        if not cat or cat in ("Other", "Water", "Fees"):
+            cat = suggest_category(desc, bool(t.is_credit))
+            if cat != (t.category or ""):
+                t.category = cat
+        payload.append(
+            {
+                "date": t.txn_date.isoformat() if t.txn_date else "",
+                "description": desc,
+                "amount": float(t.amount),
+                "is_credit": bool(t.is_credit),
+                "category": cat,
+                "card_name": d.name,
+                "last4": d.last4 or "",
+            }
+        )
+    # Checking / debit from Import (Bank of America CSV, Chase PDF, etc.)
+    actuals = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.item_type == "actual",
+            BudgetItem.is_income.is_(False),
+        )
+        .all()
+    )
+    for i in actuals:
+        desc = i.name or ""
+        cat = i.category or suggest_category(desc, False)
+        payload.append(
+            {
+                "date": i.due_date.isoformat() if i.due_date else "",
+                "description": desc,
+                "amount": float(i.amount),
+                "is_credit": False,
+                "category": cat,
+                "card_name": "Checking / bank",
+                "last4": "",
+            }
+        )
+    db.commit()
+    return analyze_card_spend(payload)
+
+
 @app.get("/api/cards")
 def list_cards(user: User = Depends(current_user), db: Session = Depends(get_db)):
     hh = get_household(db)
@@ -2111,6 +2235,91 @@ def recurring_to_calendar(
         "due_date": due.isoformat(),
         "message": f"Added {name} ({float(amount):.2f}/mo) to the calendar.",
     }
+
+
+@app.get("/api/debts/plans")
+def list_debt_plan_presets(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """A few ready-made payoff scenarios using current card balances."""
+    hh = get_household(db)
+    rows = db.query(Debt).filter(Debt.household_id == hh.id).all()
+    payload = [
+        {
+            "id": r.id,
+            "name": r.name,
+            "balance": r.balance,
+            "apr": r.apr,
+            "min_payment": r.min_payment,
+        }
+        for r in rows
+        if float(r.balance or 0) > 0.005
+    ]
+    presets = [
+        {
+            "id": "mins",
+            "title": "Minimums only",
+            "blurb": "Pay only what you already send each month. Slowest; no extra.",
+            "strategy": "avalanche",
+            "extra_monthly": 0,
+        },
+        {
+            "id": "av50",
+            "title": "Avalanche + $50",
+            "blurb": "Highest interest first, small extra. Gentle if money is tight.",
+            "strategy": "avalanche",
+            "extra_monthly": 50,
+        },
+        {
+            "id": "av100",
+            "title": "Avalanche + $100",
+            "blurb": "Highest APR first. Usually the least interest overall.",
+            "strategy": "avalanche",
+            "extra_monthly": 100,
+        },
+        {
+            "id": "av250",
+            "title": "Avalanche + $250",
+            "blurb": "Same order, more extra — faster once pay is steadier.",
+            "strategy": "avalanche",
+            "extra_monthly": 250,
+        },
+        {
+            "id": "av500",
+            "title": "Avalanche + $500",
+            "blurb": "For when income is back. Hits high-APR cards hard.",
+            "strategy": "avalanche",
+            "extra_monthly": 500,
+        },
+        {
+            "id": "sn100",
+            "title": "Snowball + $100",
+            "blurb": "Smallest balance first for quick wins, then roll that payment forward.",
+            "strategy": "snowball",
+            "extra_monthly": 100,
+        },
+        {
+            "id": "sn250",
+            "title": "Snowball + $250",
+            "blurb": "Same small-balance first, with more extra each month.",
+            "strategy": "snowball",
+            "extra_monthly": 250,
+        },
+    ]
+    out = []
+    for p in presets:
+        plan = simulate_debt_paydown(
+            payload, strategy=p["strategy"], extra_monthly=p["extra_monthly"]
+        )
+        out.append(
+            {
+                **p,
+                "months": plan.get("months") or 0,
+                "debt_free_label": plan.get("debt_free_label") or "—",
+                "total_interest": plan.get("total_interest") or 0,
+                "monthly_budget": plan.get("monthly_budget") or 0,
+                "payoff_order": (plan.get("payoff_order") or [])[:4],
+            }
+        )
+    return {"plans": out, "card_count": len(payload)}
 
 
 @app.post("/api/debts/plan", response_model=DebtPlanSummary)

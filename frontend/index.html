@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Household Money</title>
   <link rel="icon" type="image/png" href="/brand/assets/logo_icon.png" />
-  <link rel="stylesheet" href="/brand/base.css?v=1.10.12" />
-  <link rel="stylesheet" href="/static/css/app.css?v=1.10.12" />
-  <script src="/static/js/vendor/chart.umd.min.js?v=1.10.12" defer></script>
-  <script src="/static/js/app.js?v=1.10.12" defer></script>
+  <link rel="stylesheet" href="/brand/base.css?v=1.10.27" />
+  <link rel="stylesheet" href="/static/css/app.css?v=1.10.27" />
+  <script src="/static/js/vendor/chart.umd.min.js?v=1.10.27" defer></script>
+  <script src="/static/js/app.js?v=1.10.27" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -148,6 +148,9 @@
         </button>
         <button class="nav-btn" data-view="cards" type="button">
           <span class="nav-icon">▭</span> Cards
+        </button>
+        <button class="nav-btn" data-view="spend" type="button">
+          <span class="nav-icon">▣</span> Spend
         </button>
         <button class="nav-btn" data-view="debts" type="button">
           <span class="nav-icon">↓</span> Debt plan
@@ -790,7 +793,7 @@
                     <button type="button" class="help-icon" data-help="What you plan to put toward this goal each month. The app uses it to estimate when you will arrive (ETA).">?</button>
                   </label>
                   <input id="goal-monthly" class="input-money" type="number" min="0" step="0.01" value="0" />
-                  <div class="form-hint">What you can put toward this each month</div>
+                  <div class="form-hint" id="goal-split-hint">Set a target date to see the monthly split. Leave this at 0 to use that split. You can still log a different amount each month.</div>
                 </div>
                 <div class="form-group">
                   <label for="goal-notes">Notes</label>
@@ -816,6 +819,54 @@
             </div>
           </div>
           <div class="metrics-grid" id="cards-summary" style="margin-bottom:1.15rem;max-width:720px"></div>
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
+            <h2>Add a card</h2>
+            <p class="lead">Store card, furniture 0% deal, or any card without a PDF. APR can be 0.</p>
+            <form id="card-manual-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="card-man-name">Name</label>
+                  <input id="card-man-name" type="text" required maxlength="120" placeholder="Ashley, CareCredit, store card…" />
+                </div>
+                <div class="form-group">
+                  <label for="card-man-last4">Last 4 (optional)</label>
+                  <input id="card-man-last4" type="text" maxlength="4" inputmode="numeric" placeholder="1234" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="card-man-balance">Balance ($)</label>
+                  <input id="card-man-balance" class="input-money" type="number" min="0" step="0.01" value="0" required />
+                </div>
+                <div class="form-group">
+                  <label for="card-man-apr">APR (%)
+                    <button type="button" class="help-icon" data-help="Use 0 for a promo like 0% for 36 months. Debt plan uses this for interest.">?</button>
+                  </label>
+                  <input id="card-man-apr" class="input-money" type="number" min="0" max="80" step="0.01" value="0" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="card-man-pay">What I pay / month ($)</label>
+                  <input id="card-man-pay" class="input-money" type="number" min="0" step="0.01" value="0" />
+                </div>
+                <div class="form-group">
+                  <label for="card-man-due">Next due date</label>
+                  <input id="card-man-due" type="date" />
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="card-man-notes">Note (optional)</label>
+                <input id="card-man-notes" type="text" maxlength="200" placeholder="0% for 36 months, chair…" />
+              </div>
+              <label style="display:flex;align-items:center;gap:0.5rem;margin:0.5rem 0 0.85rem">
+                <input type="checkbox" id="card-man-cal" checked style="width:auto" />
+                Put this monthly payment on the calendar
+              </label>
+              <button class="btn btn-primary" type="submit">Save card</button>
+              <span id="card-man-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
           <div class="form-panel write-only" style="margin-bottom:1.5rem">
             <h2>Upload a card statement</h2>
             <p class="lead">Chase credit-card PDF from chase.com (not a photo). Checking statements still go under Import.</p>
@@ -891,6 +942,51 @@
           <div id="cards-recurring" style="margin-top:1.5rem"></div>
         </section>
 
+        <!-- SPEND -->
+        <section id="view-spend" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">All cards</span>
+              <h1>Spend
+                <button type="button" class="help-icon" data-help="Adds up charges from every credit-card PDF you uploaded. No bank login. Payments back to the card are left out. Categories are guessed from the merchant name (coffee, groceries, shopping…) so you can see the real mix across 10 cards, not one issuer app.">?</button>
+              </h1>
+              <div class="sub">Coffee, groceries, utilities — every uploaded card plus imported checking (Chase, Bank of America, …)</div>
+            </div>
+          </div>
+          <div class="metrics-grid" id="spend-summary" style="margin-bottom:1.15rem;max-width:720px"></div>
+          <div class="charts-row" style="margin-bottom:1.5rem">
+            <div class="chart-card">
+              <h3>By category</h3>
+              <canvas id="chart-spend-cat"></canvas>
+            </div>
+            <div class="chart-card">
+              <h3>By card</h3>
+              <canvas id="chart-spend-card"></canvas>
+            </div>
+          </div>
+          <div class="table-wrap" style="margin-bottom:1.5rem">
+            <h2 style="margin-bottom:0.5rem">Categories</h2>
+            <table class="data" id="spend-cat-table">
+              <thead><tr><th>Category</th><th class="num">Charges</th><th class="num">Total</th><th class="num">Share</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="table-wrap" style="margin-bottom:1.5rem">
+            <h2 style="margin-bottom:0.5rem">Each card</h2>
+            <table class="data" id="spend-card-table">
+              <thead><tr><th>Card</th><th class="num">Charges</th><th class="num">Total</th><th class="num">Share</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="table-wrap">
+            <h2 style="margin-bottom:0.5rem">Top merchants</h2>
+            <table class="data" id="spend-merch-table">
+              <thead><tr><th>Merchant</th><th>Category</th><th>Cards</th><th class="num">Times</th><th class="num">Total</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
         <!-- DEBTS -->
         <section id="view-debts" class="view">
           <div class="page-head">
@@ -953,6 +1049,8 @@
             </table>
           </div>
 
+          <div id="debt-presets" style="margin-bottom:1.5rem"></div>
+
           <div class="form-panel" style="max-width:960px">
             <h2>Build paydown plan
               <button type="button" class="help-icon" data-help="Each month the plan: (1) adds interest, (2) pays all minimums, (3) puts your extra dollars on one debt. When that debt is gone, the extra rolls to the next.">?</button>
@@ -1005,7 +1103,7 @@
                 <option value="auto" selected>Auto-detect</option>
                 <option value="chase">Chase checking (CSV or PDF)</option>
                 <option value="chase_credit">Chase credit card (CSV or PDF)</option>
-                <option value="bank_of_america">Bank of America (CSV)</option>
+                <option value="bank_of_america">Bank of America checking (CSV)</option>
                 <option value="wells_fargo">Wells Fargo (CSV)</option>
                 <option value="citi">Citi (CSV)</option>
                 <option value="us_bank">U.S. Bank (CSV)</option>

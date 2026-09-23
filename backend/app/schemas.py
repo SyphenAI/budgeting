@@ -251,6 +251,23 @@ class GoalUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class GoalSaveOut(BaseModel):
+    id: int
+    saved_on: Date
+    amount: float
+    note: str = ""
+
+    class Config:
+        from_attributes = True
+
+
+class GoalSaveCreate(BaseModel):
+    amount: float = Field(gt=0)
+    year: Optional[int] = None
+    month: Optional[int] = None
+    note: str = ""
+
+
 class GoalOut(BaseModel):
     id: int
     name: str
@@ -265,6 +282,8 @@ class GoalOut(BaseModel):
     suggested_monthly: Optional[float] = None
     eta_date: Optional[Date] = None
     on_track: Optional[bool] = None
+    saved_this_month: float = 0.0
+    saves: list[GoalSaveOut] = []
 
     class Config:
         from_attributes = True
@@ -274,12 +293,14 @@ class GoalOut(BaseModel):
 
 class DebtCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    balance: float = Field(gt=0)
+    balance: float = Field(ge=0)
     apr: float = Field(default=0, ge=0)
     min_payment: float = Field(default=0, ge=0)
     notes: str = ""
     last4: str = ""
     kind: str = "card"
+    due_date: Optional[Date] = None
+    put_min_on_calendar: bool = False
 
 
 class DebtUpdate(BaseModel):

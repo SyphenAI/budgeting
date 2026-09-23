@@ -407,6 +407,7 @@
     if (name === "subs") refreshSubs();
     if (name === "goals") refreshGoals();
     if (name === "cards") refreshCards();
+    if (name === "spend") refreshSpend();
     if (name === "debts") refreshDebts();
     if (name === "invest") refreshInvestments();
     if (name === "settings") refreshSettings();
@@ -729,7 +730,7 @@
         <div class="print-card"><div class="lbl">Income</div><div class="val">${money(m.month_income)}</div></div>
         <div class="print-card"><div class="lbl">Expenses</div><div class="val">${money(m.month_expenses)}</div></div>
         <div class="print-card"><div class="lbl">Net</div><div class="val">${money(m.net)}</div></div>
-        <div class="print-card"><div class="lbl">Month-end actual</div><div class="val">${money(endAct)}</div></div>
+        <div class="print-card"><div class="lbl">Confirmed, month end</div><div class="val">${money(endAct)}</div></div>
         <div class="print-card"><div class="lbl">Month-end estimate</div><div class="val">${money(endEst)}</div></div>
         <div class="print-card"><div class="lbl">Starting cash</div><div class="val">${money(cal.starting_balance)}</div></div>
       </div>
@@ -872,6 +873,8 @@
     const nwCls = s.net_worth >= 0 ? "positive" : "negative";
     const spent = m ? Number(m.month_expenses || 0) : 0;
     const got = m ? Number(m.month_income || 0) : 0;
+    const monthNet = got - spent;
+    const monthNetCls = monthNet >= 0 ? "positive" : "negative";
     const members = (s.members || [])
       .map((mm) => `<span>${escapeHtml(mm.display_name)}</span>`)
       .join("");
@@ -883,13 +886,14 @@
         <div class="snap-members">${members || "<span>Household</span>"}</div>
       </div>
       <div class="stat">
-        <div class="stat-label">This month ${helpBtn("Quick look at the month on the calendar: money going out / money coming in. Bank-balance snapshots are not counted as spending.")}</div>
-        <div class="stat-value snap-flow"><span class="negative">${money(spent)}</span><span class="snap-flow-sep"> / </span><span class="positive">${money(got)}</span></div>
+        <div class="stat-label">This month ${helpBtn("Spent / income for the month on the calendar. The number underneath is income minus spent (green if ahead, red if behind). Bank-balance snapshots are not counted as spending.")}</div>
         <div class="stat-hint">Spent / income</div>
+        <div class="stat-value snap-flow"><span class="negative">${money(spent)}</span><span class="snap-flow-sep"> / </span><span class="positive">${money(got)}</span></div>
+        <div class="snap-tally ${monthNetCls}">${money(monthNet)}</div>
       </div>
       <div class="stat">
         <div class="stat-label">Cash ${helpBtn("Latest bank balance you entered, or starting cash from Household settings if you have not logged a bank balance yet.")}</div>
-        <div class="stat-value">${money(s.cash)}</div>
+        <div class="stat-value ${Number(s.cash) >= 0 ? "positive" : "negative"}">${money(s.cash)}</div>
         <div class="stat-hint">Bank balance or starting cash</div>
       </div>
       <div class="stat">
@@ -902,11 +906,15 @@
         <div class="stat-value negative">${money(s.debts_total)}</div>
         <div class="stat-hint">${s.debt_count} listed</div>
       </div>
-      <div class="stat">
-        <div class="stat-label">Goals saved ${helpBtn("Money you marked as saved toward goals (vacation, house…). Tracked on the Goals page — not automatically pulled from the bank.")}</div>
+      <div class="stat snap-link" data-go-goals role="link" title="Open Goals">
+        <div class="stat-label">Goals saved ${helpBtn("Money you marked as saved toward goals (vacation, house…). Tracked on the Goals page — not automatically pulled from the bank. Tap this tile to open Goals.")}</div>
         <div class="stat-value" style="color:var(--brand-light)">${money(s.goals_saved)}</div>
-        <div class="stat-hint">of ${money(s.goals_target)} target · ${s.goal_count} goal${s.goal_count === 1 ? "" : "s"}</div>
+        <div class="stat-hint">of ${money(s.goals_target)} target · ${s.goal_count} goal${s.goal_count === 1 ? "" : "s"} · tap to open</div>
       </div>`;
+    el.querySelector("[data-go-goals]")?.addEventListener("click", (e) => {
+      if (e.target.closest(".help-icon")) return;
+      setView("goals");
+    });
   }
 
   function renderFocusStrip(cal, upcoming, snap, subs) {
@@ -1110,18 +1118,18 @@
         hint: "This month",
       },
       {
-        label: "Month-end actual",
-        help: "Green track: where cash ends the month using only confirmed money (pay + actuals).",
+        label: "Confirmed, month end",
+        help: "Where cash sits at month end using only money that already moved: pay, bills you marked Paid, and imported bank lines. Unpaid bills (mortgage still due, electric not paid yet) do not come out of this number. A bank-balance entry on a day resets this from that amount forward.",
         value: endAct,
         cls: endAct >= 0 ? "positive" : "negative",
-        hint: "Green track · confirmed only",
+        hint: "Pay + Paid only",
       },
       {
-        label: "Month-end estimate",
-        help: "Orange track: full plan including unpaid bills and estimates — the “will I make it?” number.",
+        label: "If everything is paid",
+        help: "Same month, but unpaid bills and estimates come out too — the “will I make it?” number. Use this to see overspending before you tap Paid.",
         value: endEst,
         cls: endEst >= 0 ? "positive" : "negative",
-        hint: "Orange track · full plan",
+        hint: "Includes unpaid bills",
       },
     ];
     $("#stat-cards").innerHTML = cards
@@ -2209,14 +2217,28 @@
             : g.on_track === false
               ? `<span class="goal-badge off">Behind target date</span>`
               : "";
-        const suggest = g.suggested_monthly
-          ? `<div>To hit date: save about <strong>${money(g.suggested_monthly)}</strong>/mo</div>`
-          : "";
-        const eta = g.eta_date
-          ? `<div>At current savings: <strong>${g.eta_date}</strong></div>`
-          : g.monthly_contribution > 0
+        const months = g.months_to_target;
+        const splitAmt = g.suggested_monthly;
+        const planAmt = g.monthly_contribution || splitAmt || 0;
+        const suggest = splitAmt
+          ? `<div>To hit <strong>${g.target_date}</strong>: about <strong>${money(splitAmt)}</strong>/mo for <strong>${months}</strong> month${months === 1 ? "" : "s"}</div>`
+          : g.target_date
             ? ""
-            : `<div class="text-muted">Set a monthly amount to see an arrival date</div>`;
+            : `<div class="text-muted">Add a target date to split the rest into monthly savings</div>`;
+        const eta = g.eta_date
+          ? `<div>If you keep ${money(g.monthly_contribution || 0)}/mo: <strong>${g.eta_date}</strong></div>`
+          : "";
+        const thisMo = g.saved_this_month || 0;
+        const logDefault = planAmt || 50;
+        const hist = (g.saves || []).slice(0, 8);
+        const histHtml = hist.length
+          ? `<table class="data" style="margin-top:0.65rem"><thead><tr><th>Month</th><th class="num">Saved</th></tr></thead><tbody>${hist
+              .map(
+                (s) =>
+                  `<tr><td>${String(s.saved_on).slice(0, 7)}</td><td class="num">${money(s.amount)}</td></tr>`
+              )
+              .join("")}</tbody></table>`
+          : `<p class="form-hint" style="margin-top:0.5rem">No monthly log yet — record what you actually put away.</p>`;
         return `
         <div class="goal-card">
           ${badge}
@@ -2225,20 +2247,27 @@
           <div class="goal-meta">
             <div><strong>${money(g.current_amount)}</strong> of ${money(g.target_amount)} · ${g.percent}%</div>
             <div>Still need <strong>${money(g.remaining)}</strong></div>
-            ${g.target_date ? `<div>Target date: <strong>${g.target_date}</strong></div>` : ""}
-            ${g.monthly_contribution ? `<div>Saving <strong>${money(g.monthly_contribution)}</strong>/mo</div>` : ""}
             ${suggest}
+            ${g.monthly_contribution ? `<div>Your plan: <strong>${money(g.monthly_contribution)}</strong>/mo</div>` : ""}
             ${eta}
+            <div>This month logged: <strong>${money(thisMo)}</strong>${planAmt ? ` of ${money(planAmt)} planned` : ""}</div>
             ${g.notes ? `<div class="text-muted">${escapeHtml(g.notes)}</div>` : ""}
           </div>
           ${
             isViewer()
-              ? ""
-              : `<div class="goal-actions">
-            <button class="btn btn-outline btn-sm" type="button" data-goal-add="${g.id}" data-amt="${g.monthly_contribution || 50}">+ Add monthly</button>
+              ? histHtml
+              : `<div class="goal-actions" style="flex-wrap:wrap;align-items:center">
+            <input class="input-money" data-goal-log-amt="${g.id}" type="number" min="0.01" step="0.01" value="${logDefault}" style="width:7rem" title="Amount you saved this month" />
+            <button class="btn btn-primary btn-sm" type="button" data-goal-log="${g.id}">I saved this month</button>
+            ${
+              splitAmt
+                ? `<button class="btn btn-outline btn-sm" type="button" data-goal-split="${g.id}" data-amt="${splitAmt}">Use ${money(splitAmt)}/mo split</button>`
+                : ""
+            }
             <button class="btn btn-outline btn-sm" type="button" data-goal-cal="${g.id}">Put this month on calendar</button>
             <button class="btn btn-ghost btn-sm" type="button" data-goal-del="${g.id}">Delete</button>
-          </div>`
+          </div>
+          ${histHtml}`
           }
         </div>`;
       })
@@ -2251,16 +2280,34 @@
         await refreshGoals();
       });
     });
-    box.querySelectorAll("[data-goal-add]").forEach((btn) => {
+    box.querySelectorAll("[data-goal-log]").forEach((btn) => {
       btn.addEventListener("click", async () => {
-        const id = btn.dataset.goalAdd;
-        const add = parseFloat(prompt("How much to add to savings?", btn.dataset.amt || "50"));
-        if (!add || add <= 0) return;
-        const g = goals.find((x) => String(x.id) === String(id));
-        if (!g) return;
-        await api(`/api/goals/${id}`, {
+        const id = btn.dataset.goalLog;
+        const inp = box.querySelector(`[data-goal-log-amt="${id}"]`);
+        const add = parseFloat(inp && inp.value);
+        if (!add || add <= 0) {
+          alert("Enter how much you saved this month.");
+          return;
+        }
+        try {
+          await api(`/api/goals/${id}/saves`, {
+            method: "POST",
+            json: { amount: add },
+          });
+          await refreshGoals();
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          alert(ex.message);
+        }
+      });
+    });
+    box.querySelectorAll("[data-goal-split]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const amt = parseFloat(btn.dataset.amt);
+        if (!amt || amt <= 0) return;
+        await api(`/api/goals/${btn.dataset.goalSplit}`, {
           method: "PATCH",
-          json: { current_amount: round2(g.current_amount + add) },
+          json: { monthly_contribution: amt },
         });
         await refreshGoals();
       });
@@ -2644,6 +2691,100 @@
 
   // ── Debts ───────────────────────────────────────────────────
 
+  let spendCatChart = null;
+  let spendCardChart = null;
+
+  async function refreshSpend() {
+    const data = await api("/api/cards/spend");
+    const sum = $("#spend-summary");
+    if (sum) {
+      sum.innerHTML = `
+        <div class="stat"><div class="stat-label">Card spend</div><div class="stat-value negative">${money(data.total || 0)}</div><div class="stat-hint">${data.count || 0} charges · payments left out</div></div>
+        <div class="stat"><div class="stat-label">Dining / coffee</div><div class="stat-value">${money(data.dining_total || 0)}</div><div class="stat-hint">${data.dining_count || 0} charges across all cards</div></div>
+        <div class="stat"><div class="stat-label">Cards in mix</div><div class="stat-value">${(data.by_card || []).length}</div><div class="stat-hint">From uploaded statements</div></div>`;
+    }
+    const catBody = $("#spend-cat-table tbody");
+    if (catBody) {
+      const rows = data.by_category || [];
+      catBody.innerHTML = rows.length
+        ? rows
+            .map(
+              (c) => `<tr>
+                <td>${escapeHtml(c.category)}</td>
+                <td class="num">${c.count}</td>
+                <td class="num">${money(c.amount)}</td>
+                <td class="num">${c.pct}%</td>
+              </tr>`
+            )
+            .join("")
+        : `<tr><td colspan="4" class="text-muted">Upload card PDFs under Cards first.</td></tr>`;
+    }
+    const cardBody = $("#spend-card-table tbody");
+    if (cardBody) {
+      const rows = data.by_card || [];
+      cardBody.innerHTML = rows.length
+        ? rows
+            .map(
+              (c) => `<tr>
+                <td>${escapeHtml(c.name)}${c.last4 ? ` …${escapeHtml(c.last4)}` : ""}</td>
+                <td class="num">${c.count}</td>
+                <td class="num">${money(c.amount)}</td>
+                <td class="num">${c.pct}%</td>
+              </tr>`
+            )
+            .join("")
+        : `<tr><td colspan="4" class="text-muted">No card charges yet.</td></tr>`;
+    }
+    const merchBody = $("#spend-merch-table tbody");
+    if (merchBody) {
+      const rows = data.merchants || [];
+      merchBody.innerHTML = rows.length
+        ? rows
+            .map(
+              (m) => `<tr>
+                <td>${escapeHtml(m.merchant)}</td>
+                <td>${escapeHtml(m.category)}</td>
+                <td>${escapeHtml((m.cards || []).join(", "))}</td>
+                <td class="num">${m.count}</td>
+                <td class="num">${money(m.amount)}</td>
+              </tr>`
+            )
+            .join("")
+        : `<tr><td colspan="5" class="text-muted">No merchants yet.</td></tr>`;
+    }
+    if (typeof Chart !== "undefined") {
+      const catLabels = (data.by_category || []).map((c) => c.category);
+      const catVals = (data.by_category || []).map((c) => c.amount);
+      const cardLabels = (data.by_card || []).map((c) => c.name);
+      const cardVals = (data.by_card || []).map((c) => c.amount);
+      const palette = ["#58a6ff", "#3fb950", "#d29922", "#a371f7", "#f85149", "#79c0ff", "#ea60d8", "#8b949e"];
+      const catEl = document.getElementById("chart-spend-cat");
+      const cardEl = document.getElementById("chart-spend-card");
+      if (spendCatChart) spendCatChart.destroy();
+      if (spendCardChart) spendCardChart.destroy();
+      if (catEl && catLabels.length) {
+        spendCatChart = new Chart(catEl, {
+          type: "doughnut",
+          data: {
+            labels: catLabels,
+            datasets: [{ data: catVals, backgroundColor: catLabels.map((_, i) => palette[i % palette.length]) }],
+          },
+          options: { plugins: { legend: { position: "bottom", labels: { color: "#8b949e", boxWidth: 12 } } } },
+        });
+      }
+      if (cardEl && cardLabels.length) {
+        spendCardChart = new Chart(cardEl, {
+          type: "doughnut",
+          data: {
+            labels: cardLabels,
+            datasets: [{ data: cardVals, backgroundColor: cardLabels.map((_, i) => palette[i % palette.length]) }],
+          },
+          options: { plugins: { legend: { position: "bottom", labels: { color: "#8b949e", boxWidth: 12 } } } },
+        });
+      }
+    }
+  }
+
   async function refreshDebts() {
     const [debts, hh] = await Promise.all([
       api("/api/debts"),
@@ -2691,6 +2832,47 @@
         });
       });
     }
+    await renderDebtPresets();
+  }
+
+  async function renderDebtPresets() {
+    const el = $("#debt-presets");
+    if (!el) return;
+    let data;
+    try {
+      data = await api("/api/debts/plans");
+    } catch (_) {
+      el.innerHTML = "";
+      return;
+    }
+    const plans = data.plans || [];
+    if (!plans.length) {
+      el.innerHTML = "";
+      return;
+    }
+    el.innerHTML = `<h2 style="margin:0 0 0.65rem">Ready-made plans</h2>
+      <p class="lead">Same cards, different extra amounts. Extra is on top of all minimums. Pick what fits now; you can switch when pay is steadier. Tap a plan for the month-by-month.</p>
+      <div class="plan-presets">
+        ${plans
+          .map((p) => {
+            const order = (p.payoff_order || []).map(escapeHtml).join(" → ") || "—";
+            return `<button type="button" class="plan-preset" data-plan-id="${escapeAttr(p.id)}" data-strategy="${escapeAttr(p.strategy)}" data-extra="${p.extra_monthly}">
+              <div class="section-label">${escapeHtml(p.title)}</div>
+              <div class="plan-preset-free">${escapeHtml(p.debt_free_label)}</div>
+              <div class="text-secondary" style="font-size:0.82rem;margin-top:0.35rem">${p.months} mo · interest ${money(p.total_interest)}</div>
+              <p class="form-hint" style="margin:0.45rem 0 0">${escapeHtml(p.blurb)}</p>
+              <div class="text-muted" style="font-size:0.75rem;margin-top:0.4rem">First: ${order}</div>
+            </button>`;
+          })
+          .join("")}
+      </div>`;
+    el.querySelectorAll("[data-plan-id]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if ($("#plan-strategy")) $("#plan-strategy").value = btn.dataset.strategy;
+        if ($("#plan-extra")) $("#plan-extra").value = btn.dataset.extra;
+        runDebtPlan();
+      });
+    });
   }
 
   async function runDebtPlan() {
@@ -3899,6 +4081,35 @@
     const closeBtn = $("#day-expand-close");
     if (closeBtn) closeBtn.addEventListener("click", () => closeDayExpand());
 
+    function updateGoalSplitHint() {
+      const el = $("#goal-split-hint");
+      if (!el) return;
+      const target = parseFloat($("#goal-target")?.value) || 0;
+      const current = parseFloat($("#goal-current")?.value) || 0;
+      const dateStr = $("#goal-date")?.value;
+      if (!dateStr || target <= 0) {
+        el.textContent =
+          "Set a target date to see the monthly split. Leave monthly at 0 to use that split. Log a different amount each month on the goal card.";
+        return;
+      }
+      const remaining = Math.max(target - current, 0);
+      const t = new Date(`${dateStr}T12:00:00`);
+      const now = new Date();
+      let months = (t.getFullYear() - now.getFullYear()) * 12 + (t.getMonth() - now.getMonth());
+      months = Math.max(months, 1);
+      if (remaining <= 0) {
+        el.textContent = "Already at the target.";
+        return;
+      }
+      const split = remaining / months;
+      el.textContent = `Split: about ${money(split)}/mo for ${months} month${months === 1 ? "" : "s"} to hit that date. Leave monthly at 0 to use this. You can still log a different amount each month.`;
+    }
+    ["goal-target", "goal-current", "goal-date"].forEach((id) => {
+      const n = document.getElementById(id);
+      if (n) n.addEventListener("input", updateGoalSplitHint);
+      if (n) n.addEventListener("change", updateGoalSplitHint);
+    });
+
     $("#goal-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const msg = $("#goal-form-msg");
@@ -4031,6 +4242,40 @@
           $("#sub-name").value = "";
           $("#sub-amount").value = "";
           await refreshSubs();
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message;
+        }
+      });
+    }
+
+    const cardMan = $("#card-manual-form");
+    if (cardMan) {
+      cardMan.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = $("#card-man-msg");
+        const due = ($("#card-man-due")?.value || "").trim();
+        try {
+          const data = await api("/api/debts", {
+            method: "POST",
+            json: {
+              name: $("#card-man-name").value.trim(),
+              last4: ($("#card-man-last4")?.value || "").trim(),
+              balance: parseFloat($("#card-man-balance").value),
+              apr: parseFloat($("#card-man-apr")?.value) || 0,
+              min_payment: parseFloat($("#card-man-pay")?.value) || 0,
+              due_date: due || null,
+              notes: ($("#card-man-notes")?.value || "").trim(),
+              kind: "card",
+              put_min_on_calendar: !!$("#card-man-cal")?.checked,
+            },
+          });
+          if (msg) msg.textContent = `Saved ${data.name || "card"}.`;
+          cardMan.reset();
+          if ($("#card-man-apr")) $("#card-man-apr").value = "0";
+          if ($("#card-man-cal")) $("#card-man-cal").checked = true;
+          await refreshCards();
+          await refreshDebts().catch(() => {});
           await refreshDashboard().catch(() => {});
         } catch (ex) {
           if (msg) msg.textContent = ex.message;

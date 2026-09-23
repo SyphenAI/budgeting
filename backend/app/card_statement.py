@@ -14,6 +14,8 @@ from .bank_import import _parse_amount, _parse_date
 from .bank_pdf import _normalize_statement_text, _parse_chase_statement, parse_statement_pdf
 from .categorize import looks_like_subscription, suggest_category
 
+SKIP_SPEND_CATS = {"Payment", "Transfer", "Credit card payment", "Income"}
+
 
 _SKIP_TXN = (
     "purchase interest charge",
@@ -238,3 +240,74 @@ def find_recurring_charges(txns: list[dict]) -> list[dict[str, Any]]:
         )
     out.sort(key=lambda r: (-r["count"], -r["typical_amount"]))
     return out
+
+
+def analyze_card_spend(rows: list[dict]) -> dict:
+    """rows: date, description, amount, is_credit, category, card_name, last4"""
+    spend = []
+    for r in rows:
+        if r.get("is_credit"):
+            continue
+        cat = r.get("category") or suggest_category(r.get("description") or "", False)
+        if cat in SKIP_SPEND_CATS:
+            continue
+        desc = (r.get("description") or "").lower()
+        if "thank you" in desc or "automatic payment" in desc:
+            continue
+        spend.append({**r, "category": cat, "key": merchant_key(r.get("description") or "", r.get("amount"))})
+
+    total = round(sum(float(r["amount"]) for r in spend), 2)
+    by_cat: dict[str, dict] = {}
+    by_card: dict[str, dict] = {}
+    by_merch: dict[str, dict] = {}
+    for r in spend:
+        amt = float(r["amount"])
+        cat = r["category"] or "Other"
+        card = r.get("card_name") or "Card"
+        last4 = r.get("last4") or ""
+        ck = f"{card}|{last4}"
+        mk = r.get("key") or (r.get("description") or "Unknown")[:40]
+        by_cat.setdefault(cat, {"category": cat, "amount": 0.0, "count": 0})
+        by_cat[cat]["amount"] += amt
+        by_cat[cat]["count"] += 1
+        by_card.setdefault(ck, {"name": card, "last4": last4, "amount": 0.0, "count": 0})
+        by_card[ck]["amount"] += amt
+        by_card[ck]["count"] += 1
+        by_merch.setdefault(mk, {"merchant": mk.title() if mk == mk.upper() else mk, "amount": 0.0, "count": 0, "category": cat, "cards": set()})
+        by_merch[mk]["amount"] += amt
+        by_merch[mk]["count"] += 1
+        by_merch[mk]["cards"].add(card)
+
+    def _pct(n):
+        return round(100.0 * n / total, 1) if total else 0.0
+
+    cats = sorted(by_cat.values(), key=lambda x: -x["amount"])
+    for c in cats:
+        c["amount"] = round(c["amount"], 2)
+        c["pct"] = _pct(c["amount"])
+    cards = sorted(by_card.values(), key=lambda x: -x["amount"])
+    for c in cards:
+        c["amount"] = round(c["amount"], 2)
+        c["pct"] = _pct(c["amount"])
+    merchants = []
+    for m in sorted(by_merch.values(), key=lambda x: -x["amount"])[:40]:
+        merchants.append(
+            {
+                "merchant": m["merchant"],
+                "amount": round(m["amount"], 2),
+                "count": m["count"],
+                "category": m["category"],
+                "cards": sorted(m["cards"]),
+                "pct": _pct(m["amount"]),
+            }
+        )
+    dining = next((c for c in cats if c["category"] == "Dining / coffee"), None)
+    return {
+        "total": total,
+        "count": len(spend),
+        "by_category": cats,
+        "by_card": cards,
+        "merchants": merchants,
+        "dining_total": dining["amount"] if dining else 0,
+        "dining_count": dining["count"] if dining else 0,
+    }

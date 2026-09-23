@@ -419,15 +419,60 @@ h2 .help-icon,
   gap: 0.75rem;
   margin-bottom: 1.25rem;
 }
+.plan-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+.plan-preset {
+  text-align: left;
+  background: var(--bg-dark-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.1rem;
+  cursor: pointer;
+  color: inherit;
+  font-family: inherit;
+}
+.plan-preset:hover {
+  border-color: var(--brand);
+}
+.plan-preset-free {
+  font-weight: 700;
+  color: var(--brand-light);
+  margin-top: 0.25rem;
+}
+.stat.snap-link {
+  cursor: pointer;
+}
+.stat.snap-link:hover {
+  border-color: var(--brand, #58a6ff);
+}
 .stat-value.snap-flow {
   font-size: 1.05rem;
   font-variant-numeric: tabular-nums;
   line-height: 1.25;
+  text-align: center;
+}
+.snapshot-hero .stat:has(.snap-flow) .stat-hint {
+  text-align: center;
 }
 .snap-flow-sep {
   color: var(--text-muted);
   font-weight: 500;
 }
+.snap-flow .positive { color: var(--money-positive); }
+.snap-flow .negative { color: var(--money-negative); }
+.snap-tally {
+  margin-top: 0.3rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.snap-tally.positive { color: var(--money-positive); }
+.snap-tally.negative { color: var(--money-negative); }
 .chip-actual {
   background: rgba(163, 113, 247, 0.18);
   color: #d2a8ff;
