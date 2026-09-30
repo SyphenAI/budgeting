@@ -18,7 +18,7 @@ echo  Windows may ask for permission. If Defender blocks
 echo  this, right-click update.bat -^> Run as administrator.
 echo.
 echo  Press Ctrl+C to cancel, or
-pause
+if /I not "%~1"=="/auto" pause
 
 REM --- Need PowerShell (built into Windows) ---
 where powershell >nul 2>&1
@@ -140,14 +140,15 @@ echo  Your budget data was kept in the data folder.
 echo.
 echo  Next:
 echo    1. Close ALL Household Money windows completely
-echo    2. Right-click start.bat -^> Run as administrator
+echo    2. Right-click docker-start.bat -^> Run as administrator
 echo    3. In the browser press Ctrl+F5 (hard refresh) so old pages clear
 echo    4. Sign in as usual
 echo.
+echo  Or double-click update-and-start.bat to do stop + update + start in one go.
 echo  Import should say Chase PDF is available (version file in this folder).
 echo  If start fails, run install.bat once, then start.bat.
 echo.
 del "%ZIP%" >nul 2>&1
 rmdir /s /q "%EXTRACT%" >nul 2>&1
-pause
+if /I not "%~1"=="/auto" pause
 endlocal

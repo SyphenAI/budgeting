@@ -189,7 +189,7 @@ If the PC works but the phone does not:
 2. **Check for a newer version** → **Update now**  
 3. Wait. Bills and passwords stay on this computer.
 
-Needs internet. If the button cannot run: **`docker-stop.bat`**, then right-click **`update.bat`** → **Run as administrator**, then start again.
+Needs internet. If the button cannot run: double-click **`update-and-start.bat`** in the app folder (or **`docker-stop.bat`**, then **`update.bat`**, then **`docker-start.bat`**). Then Ctrl+F5.
 
 ---
 

@@ -18,7 +18,11 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 REPO_VERSION_URL = "https://raw.githubusercontent.com/SyphenAI/budgeting/main/VERSION"
-REPO_ZIP_URL = "https://github.com/SyphenAI/budgeting/archive/refs/heads/main.zip"
+REPO_ZIP_URLS = (
+    "https://codeload.github.com/SyphenAI/budgeting/zip/refs/heads/main",
+    "https://github.com/SyphenAI/budgeting/archive/refs/heads/main.zip",
+)
+REPO_ZIP_URL = REPO_ZIP_URLS[0]
 USER_AGENT = "HouseholdMoney-Updater/1.0"
 
 EXCLUDE_DIRS = {".git", ".venv", "venv", "data", "private", "__pycache__", ".idea", ".vscode"}
@@ -62,13 +66,21 @@ def is_newer(latest: str, current: str) -> bool:
 
 
 def _http_get(url: str, timeout: int = 30) -> bytes:
-    req = Request(url, headers={"User-Agent": USER_AGENT})
+    req = Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        },
+    )
     with urlopen(req, timeout=timeout) as resp:
         return resp.read()
 
 
 def fetch_latest_version() -> str:
-    raw = _http_get(REPO_VERSION_URL, timeout=15).decode("utf-8", errors="replace")
+    url = f"{REPO_VERSION_URL}?t={int(time.time())}"
+    raw = _http_get(url, timeout=15).decode("utf-8", errors="replace")
     ver = raw.strip().splitlines()[0].strip() if raw.strip() else ""
     if not ver:
         raise RuntimeError("The update check came back empty.")
@@ -122,7 +134,16 @@ def apply_update(root: Path | None = None) -> str:
     zip_path = tmp / "app.zip"
     extract_dir = tmp / "unpack"
     try:
-        zip_path.write_bytes(_http_get(REPO_ZIP_URL, timeout=90))
+        last_err: Exception | None = None
+        for url in REPO_ZIP_URLS:
+            try:
+                zip_path.write_bytes(_http_get(url, timeout=90))
+                last_err = None
+                break
+            except Exception as exc:
+                last_err = exc
+        if last_err is not None:
+            raise last_err
         extract_dir.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as zf:
             zf.extractall(extract_dir)

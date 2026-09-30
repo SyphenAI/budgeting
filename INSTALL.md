@@ -13,6 +13,6 @@ Stop: double-click **`docker-stop.bat`**.
 
 Phone on the same Wi‑Fi: use the `http://192.…:50100` line printed in the start window.
 
-Updates: **Household** → **App updates** → **Check** → **Update now**.
+Updates: **Household** → **App updates** → **Check** → **Update now**. If that fails, double-click **update-and-start.bat** in the app folder, then Ctrl+F5.
 
 Forgot password: rescue code on the sign-in page. That does not erase the budget.

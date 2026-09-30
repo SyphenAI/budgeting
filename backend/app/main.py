@@ -3431,17 +3431,25 @@ def update_status(user: User = Depends(current_user)):
 
     available = bool(latest and is_newer(latest, current))
     if not check_ok:
+        detail = (check_error or "").strip()
         message = (
-            "Could not check for a newer version. "
-            "This computer needs internet, then tap Check again."
+            "Could not check GitHub from this app. "
+            "Tap Update now anyway, or close the app and double-click update-and-start.bat. "
+            "That uses Windows internet instead of Docker."
         )
+        if detail:
+            message = f"{message} ({detail})"
     elif available:
         message = (
             f"A newer version is ready ({latest}). "
             "Your bills, passwords, and budget stay on this computer."
         )
     else:
-        message = f"You're all set. This computer already has the latest version ({current})."
+        message = (
+            f"This computer has {current}"
+            + (f" (GitHub has {latest})" if latest else "")
+            + ". You can still tap Update now to re-download."
+        )
 
     return {
         "current": current,
@@ -3465,21 +3473,6 @@ def update_apply(user: User = Depends(current_user)):
         )
     current = read_local_version()
     try:
-        latest = fetch_latest_version()
-    except Exception:
-        raise HTTPException(
-            status_code=503,
-            detail="Could not reach the update. Check internet on this computer, then try again.",
-        )
-    if not is_newer(latest, current):
-        return {
-            "ok": True,
-            "updated": False,
-            "version": current,
-            "restarting": False,
-            "message": f"You're already on the latest version ({current}). Nothing to do.",
-        }
-    try:
         new_ver = apply_update()
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
@@ -3493,7 +3486,7 @@ def update_apply(user: User = Depends(current_user)):
     return {
         "ok": True,
         "updated": True,
-        "version": new_ver or latest,
+        "version": new_ver or current,
         "restarting": True,
         "message": (
             "Update installed. Please wait — this page will come back by itself. "

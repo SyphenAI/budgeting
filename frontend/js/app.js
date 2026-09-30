@@ -3637,13 +3637,11 @@
       else if (st.update_available) msgEl.classList.add("is-ready");
       else msgEl.classList.add("is-ok");
       if (applyBtn) {
-        applyBtn.disabled = !st.update_available || !st.can_update;
+        applyBtn.disabled = !st.can_update;
         if (!st.can_update) {
           applyBtn.title = "Ask the person who set up this app to tap Update now.";
         } else {
-          applyBtn.title = st.update_available
-            ? "Install the newer version. Your budget stays here."
-            : "No newer version right now.";
+          applyBtn.title = "Download the latest from GitHub. Your budget stays here.";
         }
       }
     } catch (ex) {
@@ -3687,7 +3685,8 @@
       if (result.restarting) {
         const back = await waitForAppBack();
         if (back) {
-          window.location.reload();
+          const next = `${window.location.pathname}?v=${Date.now()}`;
+          window.location.replace(next);
           return;
         }
         if (msgEl) {

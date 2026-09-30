@@ -6,6 +6,9 @@ services:
       - "0.0.0.0:50100:50100"
     environment:
       BUDGET_IN_DOCKER: "1"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     volumes:
       # Mount the whole app folder so an in-app Update writes to this computer.
       - .:/app
