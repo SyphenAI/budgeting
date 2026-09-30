@@ -85,6 +85,7 @@ class BudgetItem(Base):
     frequency: Mapped[str] = mapped_column(String(32), default="once")  # once|weekly|biweekly|monthly|yearly
     notes: Mapped[str] = mapped_column(Text, default="")
     is_paid: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_pay: Mapped[bool] = mapped_column(Boolean, default=False)
     category: Mapped[str] = mapped_column(String(64), default="")
     # None = guess from name; True = subscription; False = not a subscription
     is_subscription: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=None)
@@ -148,7 +149,7 @@ class Debt(Base):
     due_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     statement_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     last_interest: Mapped[float] = mapped_column(Float, default=0.0)
-    kind: Mapped[str] = mapped_column(String(16), default="card")  # card | loan
+    kind: Mapped[str] = mapped_column(String(16), default="card")  # card | loan | payday
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     household: Mapped[Household] = relationship(back_populates="debts")

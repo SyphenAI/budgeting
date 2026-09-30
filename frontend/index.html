@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Household Money</title>
   <link rel="icon" type="image/png" href="/brand/assets/logo_icon.png" />
-  <link rel="stylesheet" href="/brand/base.css?v=1.10.27" />
-  <link rel="stylesheet" href="/static/css/app.css?v=1.10.27" />
-  <script src="/static/js/vendor/chart.umd.min.js?v=1.10.27" defer></script>
-  <script src="/static/js/app.js?v=1.10.27" defer></script>
+  <link rel="stylesheet" href="/brand/base.css?v=1.10.39" />
+  <link rel="stylesheet" href="/static/css/app.css?v=1.10.39" />
+  <script src="/static/js/vendor/chart.umd.min.js?v=1.10.39" defer></script>
+  <script src="/static/js/app.js?v=1.10.39" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to main content</a>
@@ -137,6 +137,12 @@
         <button class="nav-btn" data-view="recurring" type="button">
           <span class="nav-icon">∞</span> Recurring
         </button>
+        <button class="nav-btn" data-view="loans" type="button">
+          <span class="nav-icon">◆</span> Loans
+        </button>
+        <button class="nav-btn" data-view="food" type="button">
+          <span class="nav-icon">◉</span> Food
+        </button>
         <button class="nav-btn write-only" data-view="paystub" type="button">
           <span class="nav-icon">$</span> Pay stub
         </button>
@@ -211,18 +217,28 @@
           <div id="empty-coach" class="empty-coach" style="display:none"></div>
 
           <div class="snapshot-hero" id="snapshot-hero"></div>
+
+          <div class="dash-top home-overview">
+            <div class="metrics-grid" id="stat-cards"></div>
+            <div class="chart-box">
+              <h3>Spend by category</h3>
+              <p class="form-hint" id="spend-cat-hint" style="margin:0 0 0.4rem">Tap a slice or name to see this month’s items.</p>
+              <div class="chart-canvas-wrap" id="chart-category-wrap">
+                <canvas id="chart-category"></canvas>
+              </div>
+              <div id="spend-cat-detail" class="spend-cat-detail" hidden></div>
+            </div>
+          </div>
+
+          <div id="must-pay" class="must-pay" aria-live="polite"></div>
           <div id="focus-strip" class="focus-strip" aria-live="polite"></div>
 
           <div class="dash-top">
             <div>
-              <div class="metrics-grid" id="stat-cards"></div>
               <div id="threshold-banner" class="alert alert-warning" style="display:none;margin-bottom:0.85rem"></div>
               <div class="legend">
-                <span><i style="background:#f85149"></i> Low (act)
-                  <button type="button" class="help-icon" data-help="Confirmed cash path is at or below your safety amount (set in Household).">?</button>
-                </span>
-                <span><i style="background:#d29922"></i> Low (est)
-                  <button type="button" class="help-icon" data-help="Planned cash path is at or below your safety amount. Good early warning before the month gets tight.">?</button>
+                <span><i style="background:#d29922"></i> Near safety
+                  <button type="button" class="help-icon" data-help="That day’s running cash is at or below the safety amount in Household. A heads-up, not a scolding.">?</button>
                 </span>
                 <span><i style="background:#79b8ff"></i> Bill
                   <button type="button" class="help-icon" data-help="A bill you expect to pay — rent, phone, insurance. Put the due date so it shows on the calendar.">?</button>
@@ -234,13 +250,13 @@
                   <button type="button" class="help-icon" data-help="Money that really moved: a paycheck that hit, or a purchase you confirmed. These update the green “act” balance.">?</button>
                 </span>
                 <span><i style="background:#e6edf3"></i> Bank balance
-                  <button type="button" class="help-icon" data-help="When you check your bank, enter the total as “Current bank balance” on that date. The calendar restarts both running totals from that amount — like hitting reset with real life.">?</button>
+                  <button type="button" class="help-icon" data-help="When you check your bank, enter the total as “Current bank balance” on that date — including a minus if you are overdrawn. The calendar restarts both running totals from that amount.">?</button>
                 </span>
                 <span style="color:#3fb950;font-family:var(--font-mono);font-weight:700">act
                   <button type="button" class="help-icon" data-help="Green “act” = confirmed path. Paychecks + actuals (and paid bills). Best view of money you know about.">?</button>
                 </span>
                 <span style="color:#e3b341;font-family:var(--font-mono);font-weight:700">est
-                  <button type="button" class="help-icon" data-help="Orange “est” = full plan. Includes unpaid bills and estimates too, so you can see if the month will be tight before it happens.">?</button>
+                  <button type="button" class="help-icon" data-help="Orange “est” includes unpaid bills and estimates so you can see the rest of the month’s plan.">?</button>
                 </span>
                 <span class="text-muted">Click a day to expand
                   <button type="button" class="help-icon" data-help="Tap any date on the calendar to open a list of everything that day — useful when there are lots of small items.">?</button>
@@ -277,12 +293,6 @@
               </div>
             </div>
             <div>
-              <div class="chart-box" style="margin-bottom:1rem">
-                <h3>Spend by category</h3>
-                <div class="chart-canvas-wrap">
-                  <canvas id="chart-category"></canvas>
-                </div>
-              </div>
               <div class="chart-box">
                 <h3>Income vs paid</h3>
                 <div class="chart-canvas-wrap">
@@ -344,7 +354,7 @@
               <div class="form-row">
                 <div class="form-group">
                   <label for="item-type">Type
-                    <button type="button" class="help-icon" data-help="Bill = planned bill. Estimate = monthly guess (food/gas). Paycheck = money coming in. Actual = confirmed spend or deposit. Bank balance = “I have $X in the bank today” and resets running totals.">?</button>
+                    <button type="button" class="help-icon" data-help="Bill = planned bill. Estimate = monthly guess (food/gas). Paycheck = money coming in. Actual = confirmed spend or deposit. Bank balance = the amount in the bank that day (negative if overdrawn) and resets running totals.">?</button>
                   </label>
                   <select id="item-type">
                     <option value="bill">Bill (planned)</option>
@@ -356,9 +366,10 @@
                 </div>
                 <div class="form-group">
                   <label for="item-amount">Amount
-                    <button type="button" class="help-icon" data-help="For bills, estimates, pay, and actuals: the dollar amount. For bank balance: the full amount showing in your bank that day (not a payment).">?</button>
+                    <button type="button" class="help-icon" data-help="For bills, estimates, pay, and actuals: the dollar amount. For bank balance: type what the bank shows that day, including a minus if the account is overdrawn.">?</button>
                   </label>
                   <input id="item-amount" class="input-money" type="number" min="0.01" step="0.01" required placeholder="0.00" />
+                  <div class="form-hint" id="item-amount-hint" hidden>Overdraft: type a minus (example −45.00).</div>
                 </div>
               </div>
               <div class="form-row">
@@ -370,15 +381,29 @@
                 </div>
                 <div class="form-group">
                   <label for="item-freq">Repeats
-                    <button type="button" class="help-icon" data-help="One time = only this date. Same day each month = puts it on that day for the next few months (rent, car payment). Every 2 weeks = like many paychecks — fills the calendar every 14 days from the date you pick.">?</button>
+                    <button type="button" class="help-icon" data-help="One time = only this date. Same day each month = rent, car. Every 2 weeks = many paychecks. Every week on a day = Friday groceries, a weekly bill — pick the weekday.">?</button>
                   </label>
                   <select id="item-freq">
                     <option value="once">One time only</option>
                     <option value="monthly" selected>Same day each month</option>
                     <option value="yearly">Once a year (Prime, Apple yearly)</option>
                     <option value="biweekly">Every 2 weeks (pay)</option>
+                    <option value="weekly">Every week on a day</option>
                   </select>
                   <div class="form-hint" id="item-freq-hint">Example: pick the 1st → rent shows on the 1st for the next few months.</div>
+                  <div id="item-weekday-wrap" hidden style="margin-top:0.55rem">
+                    <label for="item-weekday">Every week on</label>
+                    <select id="item-weekday">
+                      <option value="0">Sunday</option>
+                      <option value="1">Monday</option>
+                      <option value="2">Tuesday</option>
+                      <option value="3">Wednesday</option>
+                      <option value="4">Thursday</option>
+                      <option value="5" selected>Friday</option>
+                      <option value="6">Saturday</option>
+                    </select>
+                    <div class="form-hint">Example: Friday → groceries or a bill every Friday.</div>
+                  </div>
                 </div>
               </div>
               <div class="form-row">
@@ -401,6 +426,12 @@
                 <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
                   <input type="checkbox" id="item-sub" style="width:auto" />
                   This is a subscription (Apple, Netflix, software, gym…)
+                </label>
+              </div>
+              <div class="form-group">
+                <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
+                  <input type="checkbox" id="item-autopay" style="width:auto" />
+                  Auto-pay — mark Paid on the due date
                 </label>
               </div>
               <button class="btn btn-primary" type="submit">Save item</button>
@@ -433,9 +464,9 @@
             <div>
               <span class="section-label">Every month</span>
               <h1>Recurring
-                <button type="button" class="help-icon" data-help="Mortgage, car, electric, water. Change THIS month when the bill is different (Florida water, lawn watering) without changing later months. Change usual amount when the rate went up for good.">?</button>
+                <button type="button" class="help-icon" data-help="Mortgage, car, electric, water. Edit opens the form — pick this date only, or this date and later months. You can also type a new name or amount in the table. Stop ends the repeat from the next date.">?</button>
               </h1>
-              <div class="sub">Update this month vs later months — water and electric can change</div>
+              <div class="sub">Edit a bill, change this month vs later months, or stop the repeat</div>
             </div>
           </div>
           <div class="form-panel write-only" style="margin-bottom:1.5rem">
@@ -466,6 +497,18 @@
                 </div>
               </div>
               <div class="form-row">
+                <div class="form-group" id="rec-add-weekday-wrap" hidden>
+                  <label for="rec-add-weekday">Every week on</label>
+                  <select id="rec-add-weekday">
+                    <option value="0">Sunday</option>
+                    <option value="1">Monday</option>
+                    <option value="2">Tuesday</option>
+                    <option value="3">Wednesday</option>
+                    <option value="4">Thursday</option>
+                    <option value="5" selected>Friday</option>
+                    <option value="6">Saturday</option>
+                  </select>
+                </div>
                 <div class="form-group">
                   <label for="rec-add-start">First / next date (every 2 weeks)</label>
                   <input id="rec-add-start" type="date" />
@@ -479,11 +522,156 @@
                   </select>
                 </div>
               </div>
+              <label style="display:flex;align-items:center;gap:0.5rem;margin:0.35rem 0 0.75rem">
+                <input type="checkbox" id="rec-add-autopay" style="width:auto" />
+                Auto-pay — mark Paid on the due date
+              </label>
               <button class="btn btn-primary" type="submit">Add to calendar</button>
               <span id="rec-add-msg" class="form-hint" style="margin-left:0.75rem"></span>
             </form>
           </div>
           <div id="recurring-list"></div>
+        </section>
+
+        <!-- LOANS -->
+        <section id="view-loans" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Pay back</span>
+              <h1>Loans
+                <button type="button" class="help-icon" data-help="Payday, car, title, or a loan from family. Amount due is what you hand them on that date. Put it on the calendar so it shows with the other bills.">?</button>
+              </h1>
+              <div class="sub">What you still have to pay back, and when</div>
+            </div>
+          </div>
+          <div class="metrics-grid" id="loans-summary" style="margin-bottom:1.15rem;max-width:720px"></div>
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
+            <h2>Add a loan</h2>
+            <p class="lead">Name, amount due, and the date. Payday is the usual case.</p>
+            <form id="loan-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="loan-kind">Type</label>
+                  <select id="loan-kind">
+                    <option value="payday" selected>Payday</option>
+                    <option value="loan">Car / personal / other</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="loan-name">Who / name</label>
+                  <input id="loan-name" type="text" required maxlength="120" placeholder="Lender, shop, family…" />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="loan-amount">Amount due ($)
+                    <button type="button" class="help-icon" data-help="What you still have to pay back. If you borrowed $200 and they want $230, type 230.">?</button>
+                  </label>
+                  <input id="loan-amount" class="input-money" type="number" min="0.01" step="0.01" required />
+                </div>
+                <div class="form-group">
+                  <label for="loan-due">Due date</label>
+                  <input id="loan-due" type="date" required />
+                </div>
+              </div>
+              <div id="loan-extra-fields" hidden>
+                <div class="form-row">
+                  <div class="form-group">
+                    <label for="loan-apr">APR (%) — optional</label>
+                    <input id="loan-apr" class="input-money" type="number" min="0" step="0.01" value="0" />
+                  </div>
+                  <div class="form-group">
+                    <label for="loan-min">Monthly payment ($) — optional</label>
+                    <input id="loan-min" class="input-money" type="number" min="0" step="0.01" value="0" />
+                    <div class="form-hint">Leave 0 to use the amount due each month.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="loan-notes">Note (optional)</label>
+                <input id="loan-notes" type="text" maxlength="200" placeholder="Rollover, store, etc." />
+              </div>
+              <label style="display:flex;align-items:center;gap:0.5rem;margin:0.5rem 0 0.85rem">
+                <input type="checkbox" id="loan-cal" checked style="width:auto" />
+                Put this on the calendar
+              </label>
+              <button class="btn btn-primary" type="submit">Save loan</button>
+              <span id="loan-form-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
+          <div id="loans-list"></div>
+        </section>
+
+        <!-- FOOD ASSISTANCE -->
+        <section id="view-food" class="view">
+          <div class="page-head">
+            <div>
+              <span class="section-label">Benefits</span>
+              <h1>Food assistance
+                <button type="button" class="help-icon" data-help="SNAP, EBT, WIC, or grocery money you set aside. Put the deposit or the grocery day on the calendar as income or a plan. Weekly can be a weekday — like food on Friday.">?</button>
+              </h1>
+              <div class="sub">SNAP / EBT / grocery day — monthly or every Friday</div>
+            </div>
+          </div>
+          <div class="metrics-grid" id="food-summary" style="margin-bottom:1.15rem;max-width:720px"></div>
+          <div class="form-panel write-only" style="margin-bottom:1.5rem">
+            <h2>Add food assistance</h2>
+            <p class="lead">When SNAP hits, or the day you buy groceries. Amount can change later on Recurring.</p>
+            <form id="food-form">
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="food-name">Name</label>
+                  <input id="food-name" type="text" required maxlength="120" value="Food assistance" />
+                </div>
+                <div class="form-group">
+                  <label for="food-amount">Amount ($)
+                    <button type="button" class="help-icon" data-help="SNAP deposit, or what you set aside for food that cycle.">?</button>
+                  </label>
+                  <input id="food-amount" class="input-money" type="number" min="0.01" step="0.01" required />
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group">
+                  <label for="food-kind">What is it</label>
+                  <select id="food-kind">
+                    <option value="paycheck" selected>SNAP / EBT deposit (income)</option>
+                    <option value="estimate">Grocery plan (estimate)</option>
+                    <option value="bill">Grocery bill</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="food-freq">Repeats</label>
+                  <select id="food-freq">
+                    <option value="monthly" selected>Same day each month</option>
+                    <option value="weekly">Every week on a day</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-row">
+                <div class="form-group" id="food-day-wrap">
+                  <label for="food-day">Day of month</label>
+                  <input id="food-day" type="number" min="1" max="28" value="3" />
+                  <div class="form-hint">SNAP often hits on a set day of the month.</div>
+                </div>
+                <div class="form-group" id="food-weekday-wrap" hidden>
+                  <label for="food-weekday">Every week on</label>
+                  <select id="food-weekday">
+                    <option value="0">Sunday</option>
+                    <option value="1">Monday</option>
+                    <option value="2">Tuesday</option>
+                    <option value="3">Wednesday</option>
+                    <option value="4">Thursday</option>
+                    <option value="5" selected>Friday</option>
+                    <option value="6">Saturday</option>
+                  </select>
+                  <div class="form-hint">Example: groceries every Friday.</div>
+                </div>
+              </div>
+              <button class="btn btn-primary" type="submit">Add to calendar</button>
+              <span id="food-form-msg" class="form-hint" style="margin-left:0.75rem"></span>
+            </form>
+          </div>
+          <div id="food-list"></div>
         </section>
 
         <!-- PAY STUB -->
@@ -1453,6 +1641,7 @@
                 <div class="form-group">
                   <label for="edit-item-amount">Amount ($)</label>
                   <input id="edit-item-amount" class="input-money" type="number" step="0.01" min="0.01" required />
+                  <div class="form-hint" id="edit-item-amount-hint" hidden>Overdraft: use a minus (example −45.00).</div>
                 </div>
                 <div class="form-group">
                   <label for="edit-item-date">Date</label>
@@ -1477,8 +1666,20 @@
                     <option value="monthly">Same day each month</option>
                     <option value="yearly">Once a year</option>
                     <option value="biweekly">Every 2 weeks (pay)</option>
-                    <option value="weekly">Weekly</option>
+                    <option value="weekly">Every week on a day</option>
                   </select>
+                  <div id="edit-item-weekday-wrap" hidden style="margin-top:0.55rem">
+                    <label for="edit-item-weekday">Every week on</label>
+                    <select id="edit-item-weekday">
+                      <option value="0">Sunday</option>
+                      <option value="1">Monday</option>
+                      <option value="2">Tuesday</option>
+                      <option value="3">Wednesday</option>
+                      <option value="4">Thursday</option>
+                      <option value="5">Friday</option>
+                      <option value="6">Saturday</option>
+                    </select>
+                  </div>
                 </div>
               </div>
               <div class="form-group">
@@ -1493,6 +1694,12 @@
                 <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
                   <input type="checkbox" id="edit-item-sub" style="width:auto" />
                   This is a subscription
+                </label>
+              </div>
+              <div class="form-group">
+                <label style="display:flex;align-items:center;gap:0.5rem;text-transform:none;letter-spacing:0;font-size:0.875rem;font-weight:500;color:var(--text-secondary)">
+                  <input type="checkbox" id="edit-item-autopay" style="width:auto" />
+                  Auto-pay — mark Paid on the due date
                 </label>
               </div>
               <div class="form-group" id="edit-item-paid-row">

@@ -515,6 +515,23 @@ def list_items(
     return q.order_by(BudgetItem.due_date, BudgetItem.id).all()
 
 
+@app.get("/api/items/{item_id}", response_model=BudgetItemOut)
+def get_item(
+    item_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    hh = get_household(db)
+    item = (
+        db.query(BudgetItem)
+        .filter(BudgetItem.id == item_id, BudgetItem.household_id == hh.id)
+        .first()
+    )
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return item
+
+
 def _repeat_dates(start: date, frequency: str, months_ahead: int = 3) -> list[date]:
     """
     Build calendar dates for a recurring item.
@@ -592,7 +609,12 @@ def create_item(
             due_date=due,
             frequency=freq,
             notes=body.notes or "",
-            is_paid=bool(body.is_paid) if i == 0 else False,
+            is_paid=(
+                True
+                if body.auto_pay and due <= date.today()
+                else (bool(body.is_paid) if i == 0 else False)
+            ),
+            auto_pay=bool(body.auto_pay),
             category=body.category or "",
             is_subscription=sub_flag,
         )
@@ -741,6 +763,7 @@ def list_recurring_series(user: User = Depends(current_user), db: Session = Depe
     hh = get_household(db)
     today = date.today()
     ensure_recurring_through(db, hh.id, today.year, today.month, extra_months=2)
+    apply_autopay(db, hh.id)
     rows = (
         db.query(BudgetItem)
         .filter(
@@ -781,6 +804,7 @@ def list_recurring_series(user: User = Depends(current_user), db: Session = Depe
                 "this_month_date": this_it.due_date.isoformat() if this_it else None,
                 "this_month_amount": float(this_it.amount) if this_it else None,
                 "this_month_paid": bool(this_it.is_paid) if this_it else False,
+                "auto_pay": bool(getattr(next_it, "auto_pay", False) or (this_it and getattr(this_it, "auto_pay", False))),
                 "next_date": next_it.due_date.isoformat(),
                 "typical_amount": typical,
                 "count": len(bunch),
@@ -807,6 +831,9 @@ def update_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     data = body.model_dump(exclude_unset=True)
+    new_type = data.get("item_type", item.item_type)
+    if "amount" in data and new_type != "balance" and float(data["amount"]) <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be greater than 0")
     return update_series(db, hh.id, item, data, scope=scope)
 
 
@@ -1137,6 +1164,27 @@ def _apply_day_balances(
     return running_est, running_actual, delta_est, delta_actual, anchored
 
 
+def apply_autopay(db: Session, household_id: int) -> int:
+    """Mark auto-pay bills as paid once their due date has arrived."""
+    today = date.today()
+    rows = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == household_id,
+            BudgetItem.auto_pay.is_(True),
+            BudgetItem.is_paid.is_(False),
+            BudgetItem.due_date <= today,
+            BudgetItem.item_type.in_(("bill", "estimate")),
+        )
+        .all()
+    )
+    for row in rows:
+        row.is_paid = True
+    if rows:
+        db.commit()
+    return len(rows)
+
+
 @app.get("/api/calendar", response_model=CalendarResponse)
 def calendar(
     year: int = Query(default=None),
@@ -1149,6 +1197,7 @@ def calendar(
     month = month or today.month
     hh = get_household(db)
     ensure_recurring_through(db, hh.id, year, month, extra_months=2)
+    apply_autopay(db, hh.id)
 
     start = date(year, month, 1)
     last = monthrange(year, month)[1]
@@ -1699,14 +1748,19 @@ def create_debt(
         min_payment=float(body.min_payment or 0),
         notes=body.notes or "",
         last4=(body.last4 or "").strip()[-4:],
-        kind=body.kind if body.kind in ("card", "loan") else "card",
+        kind=body.kind if body.kind in ("card", "loan", "payday") else "card",
         due_date=body.due_date,
     )
+    if d.kind == "payday" and float(d.min_payment or 0) <= 0:
+        d.min_payment = float(d.balance or 0)
     db.add(d)
     db.commit()
     db.refresh(d)
-    if body.put_min_on_calendar and float(d.min_payment or 0) > 0:
-        _put_card_min_on_calendar(db, hh, d)
+    if body.put_min_on_calendar:
+        if d.kind in ("loan", "payday"):
+            _put_loan_on_calendar(db, hh, d)
+        elif float(d.min_payment or 0) > 0:
+            _put_card_min_on_calendar(db, hh, d)
     return _debt_out(d, db)
 
 
@@ -1725,11 +1779,18 @@ def update_debt(
     data = body.model_dump(exclude_unset=True)
     if "last4" in data and data["last4"] is not None:
         data["last4"] = str(data["last4"]).strip()[-4:]
+    if "kind" in data and data["kind"] not in ("card", "loan", "payday"):
+        data.pop("kind")
     for k, v in data.items():
         setattr(d, k, v)
+    if d.kind == "payday" and float(d.min_payment or 0) <= 0 and float(d.balance or 0) > 0:
+        d.min_payment = float(d.balance)
     db.commit()
     db.refresh(d)
-    _sync_card_min_bill(db, hh, d, old_name=old_name)
+    if (getattr(d, "kind", None) or "card") in ("loan", "payday"):
+        _sync_loan_bill(db, hh, d, old_name=old_name)
+    else:
+        _sync_card_min_bill(db, hh, d, old_name=old_name)
     return _debt_out(d, db)
 
 
@@ -1746,6 +1807,50 @@ def delete_debt(
     db.delete(d)
     db.commit()
     return {"ok": True}
+
+
+@app.post("/api/debts/{debt_id}/to-calendar")
+def debt_to_calendar(
+    debt_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    hh = get_household(db)
+    d = db.query(Debt).filter(Debt.id == debt_id, Debt.household_id == hh.id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    if (getattr(d, "kind", None) or "card") in ("loan", "payday"):
+        return _put_loan_on_calendar(db, hh, d)
+    return _put_card_min_on_calendar(db, hh, d)
+
+
+@app.post("/api/debts/{debt_id}/paid")
+def mark_debt_paid(
+    debt_id: int,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    hh = get_household(db)
+    d = db.query(Debt).filter(Debt.id == debt_id, Debt.household_id == hh.id).first()
+    if not d:
+        raise HTTPException(status_code=404, detail="Loan not found")
+    d.balance = 0
+    kind = getattr(d, "kind", None) or "card"
+    bill_name = _loan_bill_name(d) if kind in ("loan", "payday") else f"Card min: {d.name}"[:120]
+    bills = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.name == bill_name,
+            BudgetItem.is_paid == False,
+        )
+        .all()
+    )
+    for row in bills:
+        row.is_paid = True
+    db.commit()
+    db.refresh(d)
+    return _debt_out(d, db)
 
 
 @app.post("/api/cards/preview")
@@ -1886,6 +1991,97 @@ def _put_card_min_on_calendar(db: Session, hh: Household, debt: Debt) -> dict:
         "created": True,
         "item_id": item.id,
         "message": f"Added {name} ({float(debt.min_payment):.2f}) as a monthly bill.",
+    }
+
+
+def _loan_bill_name(debt: Debt) -> str:
+    return f"Loan: {debt.name}"[:120]
+
+
+def _loan_pay_amount(debt: Debt) -> float:
+    mp = float(debt.min_payment or 0)
+    if mp > 0:
+        return mp
+    return float(debt.balance or 0)
+
+
+def _sync_loan_bill(db: Session, hh: Household, debt: Debt, old_name: str | None = None) -> None:
+    names = [_loan_bill_name(debt)]
+    if old_name and old_name != debt.name:
+        names.append(f"Loan: {old_name}"[:120])
+    rows = (
+        db.query(BudgetItem)
+        .filter(BudgetItem.household_id == hh.id, BudgetItem.name.in_(names))
+        .all()
+    )
+    if not rows:
+        return
+    new_name = _loan_bill_name(debt)
+    amt = _loan_pay_amount(debt)
+    payday = (getattr(debt, "kind", "") or "") == "payday"
+    for row in rows:
+        if row.is_paid:
+            continue
+        row.name = new_name
+        if amt > 0:
+            row.amount = amt
+        if payday and debt.due_date:
+            row.due_date = debt.due_date
+            row.frequency = "once"
+        elif debt.due_date and row.due_date:
+            last = monthrange(row.due_date.year, row.due_date.month)[1]
+            row.due_date = date(row.due_date.year, row.due_date.month, min(debt.due_date.day, last))
+    db.commit()
+
+
+def _put_loan_on_calendar(db: Session, hh: Household, debt: Debt) -> dict:
+    amt = _loan_pay_amount(debt)
+    if amt <= 0:
+        return {"created": False, "message": "No amount to put on the calendar."}
+    due = debt.due_date or date.today()
+    name = _loan_bill_name(debt)
+    payday = (getattr(debt, "kind", "") or "") == "payday"
+    freq = "once" if payday else "monthly"
+    existing = (
+        db.query(BudgetItem)
+        .filter(
+            BudgetItem.household_id == hh.id,
+            BudgetItem.name == name,
+            BudgetItem.is_paid == False,
+        )
+        .order_by(BudgetItem.due_date.desc())
+        .first()
+    )
+    if existing:
+        existing.amount = amt
+        existing.due_date = due
+        existing.frequency = freq
+        existing.item_type = "bill"
+        db.commit()
+        return {
+            "created": False,
+            "item_id": existing.id,
+            "message": f"Updated {name} on the calendar ({amt:.2f}).",
+        }
+    item = BudgetItem(
+        household_id=hh.id,
+        name=name,
+        item_type="bill",
+        amount=amt,
+        is_income=False,
+        due_date=due,
+        frequency=freq,
+        notes="Payday loan" if payday else "Loan payment",
+        category="Debt",
+        is_subscription=False,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return {
+        "created": True,
+        "item_id": item.id,
+        "message": f"Added {name} ({amt:.2f}) on {due.isoformat()}.",
     }
 
 
@@ -2067,6 +2263,8 @@ def list_cards(user: User = Depends(current_user), db: Session = Depends(get_db)
     cards = []
     all_recurring = []
     for d in rows:
+        if (getattr(d, "kind", None) or "card") != "card":
+            continue
         txns = (
             db.query(CardTransaction)
             .filter(CardTransaction.debt_id == d.id)
@@ -2249,6 +2447,7 @@ def list_debt_plan_presets(user: User = Depends(current_user), db: Session = Dep
             "balance": r.balance,
             "apr": r.apr,
             "min_payment": r.min_payment,
+            "kind": getattr(r, "kind", None) or "card",
         }
         for r in rows
         if float(r.balance or 0) > 0.005
@@ -2337,6 +2536,7 @@ def debt_plan(
             "balance": r.balance,
             "apr": r.apr,
             "min_payment": r.min_payment,
+            "kind": getattr(r, "kind", None) or "card",
         }
         for r in rows
     ]

@@ -100,6 +100,12 @@ def migrate_sqlite() -> None:
                 conn.execute(text("ALTER TABLE budget_items ADD COLUMN repeat_until DATE"))
             if "is_subscription" not in icols:
                 conn.execute(text("ALTER TABLE budget_items ADD COLUMN is_subscription BOOLEAN"))
+            if "auto_pay" not in icols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE budget_items ADD COLUMN auto_pay BOOLEAN NOT NULL DEFAULT 0"
+                    )
+                )
         if "debts" in insp.get_table_names():
             dcols = {c["name"] for c in insp.get_columns("debts")}
             if "last4" not in dcols:

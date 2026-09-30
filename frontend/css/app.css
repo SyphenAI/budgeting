@@ -419,6 +419,35 @@ h2 .help-icon,
   gap: 0.75rem;
   margin-bottom: 1.25rem;
 }
+.must-pay {
+  margin: 0 0 1.15rem;
+  background: var(--bg-dark-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0.85rem 1rem 0.35rem;
+}
+.must-pay-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+.must-pay-head h2 {
+  font-size: 1rem;
+  margin: 0;
+}
+.must-pay-need {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.must-pay-table {
+  border: none;
+}
+.must-pay tr[data-must-day] { cursor: pointer; }
+.must-pay tr[data-must-day]:hover { background: rgba(255,255,255,0.03); }
+
 .plan-presets {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -505,21 +534,29 @@ table.data input::placeholder {
   color: var(--text-muted);
 }
 .snap-net {
-  background: linear-gradient(135deg, rgba(200, 16, 46, 0.16), rgba(13, 17, 23, 0.4));
-  border: 1px solid var(--brand-border);
+  background: var(--bg-dark-2);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 1.15rem 1.25rem;
   position: relative;
   overflow: hidden;
+}
+.snap-net.is-ahead {
+  background: linear-gradient(135deg, rgba(63, 185, 80, 0.14), rgba(13, 17, 23, 0.35));
+  border-color: rgba(63, 185, 80, 0.28);
 }
 .snap-net::before {
   content: "";
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 2px;
-  background: var(--brand);
+  background: var(--border);
 }
-.snap-net .stat-label { color: var(--brand-light); }
+.snap-net.is-ahead::before {
+  background: var(--success);
+}
+.snap-net .stat-label { color: var(--text-muted); }
+.snap-net.is-ahead .stat-label { color: #7ee787; }
 .snap-net .stat-value { font-size: 1.9rem; }
 .snap-members {
   margin-top: 0.55rem;
@@ -640,6 +677,20 @@ table.data input::placeholder {
   gap: 1.25rem;
   margin-bottom: 1.25rem;
 }
+.home-overview {
+  align-items: start;
+  margin-bottom: 1.15rem;
+}
+.spend-cat-detail {
+  margin-top: 0;
+}
+.spend-cat-detail-scroll {
+  max-height: 280px;
+  overflow-y: auto;
+  margin-top: 0.5rem;
+  -webkit-overflow-scrolling: touch;
+}
+.spend-cat-detail tr[data-cat-day] { cursor: pointer; }
 
 .metrics-grid {
   display: grid;
@@ -696,7 +747,7 @@ table.data input::placeholder {
 
 .cal-weekdays {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   background: var(--bg-dark-3);
   border-bottom: 1px solid var(--border);
 }
@@ -709,15 +760,18 @@ table.data input::placeholder {
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .cal-grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .cal-cell {
   min-height: 118px;
+  min-width: 0;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   padding: 0.4rem;
@@ -812,12 +866,12 @@ table.data input::placeholder {
   box-shadow: inset 0 0 0 1px rgba(210, 153, 34, 0.45);
 }
 .cal-cell.warn-act {
-  background: rgba(248, 81, 73, 0.10);
-  box-shadow: inset 0 0 0 1.5px rgba(248, 81, 73, 0.55);
+  background: rgba(210, 153, 34, 0.10);
+  box-shadow: inset 0 0 0 1px rgba(210, 153, 34, 0.45);
 }
 .cal-cell.warn-act.warn-est {
-  background: rgba(248, 81, 73, 0.12);
-  box-shadow: inset 0 0 0 1.5px rgba(248, 81, 73, 0.6);
+  background: rgba(210, 153, 34, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(210, 153, 34, 0.5);
 }
 .cal-cell.selected.warn-est,
 .cal-cell.selected.warn-act {
@@ -841,9 +895,9 @@ table.data input::placeholder {
   border: 1px solid rgba(210, 153, 34, 0.4);
 }
 .cal-warn-badge.act {
-  background: rgba(248, 81, 73, 0.22);
-  color: #f85149;
-  border: 1px solid rgba(248, 81, 73, 0.45);
+  background: rgba(210, 153, 34, 0.22);
+  color: #e3b341;
+  border: 1px solid rgba(210, 153, 34, 0.4);
 }
 .day-expand-warn {
   margin: 0 1rem 0.75rem;
@@ -1239,6 +1293,8 @@ table.data input::placeholder {
   gap: 0.25rem;
   white-space: nowrap;
 }
+.loan-due-soon { color: #e3b341; font-weight: 600; }
+.loan-due-today { color: #e3b341; font-weight: 700; }
 .day-actions-col { min-width: 9rem; }
 .row-paid td:first-child { opacity: 0.85; }
 .text-danger { color: #f85149 !important; }
@@ -1325,11 +1381,9 @@ tr.import-dup td { background: rgba(210, 153, 34, 0.08); }
   }
   .cal-grid,
   .cal-weekdays {
-    min-width: 0;
+    min-width: 720px;
   }
-  .cal-cell { min-height: 72px; padding: 0.3rem; }
-  .cal-pills { display: none; }
-  .legend { display: none; }
+  .cal-cell { min-height: 108px; }
   .focus-row { min-height: 44px; }
   .pill {
     font-size: 0.72rem;
@@ -1391,7 +1445,13 @@ body.role-viewer .goal-actions {
   .metrics-grid { grid-template-columns: 1fr 1fr; }
   .pill { font-size: 0.7rem; }
   .cal-balance { font-size: 0.68rem; }
-  .cal-cell { min-height: 96px; padding: 0.35rem; }
+  .cal-grid,
+  .cal-weekdays {
+    min-width: 560px;
+  }
+  .cal-cell { min-height: 88px; padding: 0.35rem; }
+  .cal-pills { display: none; }
+  .legend { display: none; }
   .dash-name-wrap {
     flex-wrap: wrap;
   }

@@ -26,10 +26,19 @@
     cardRecurring: [],
     cardRecurringQ: "",
     cardRecurringKind: "active",
+    spendCatFilter: "",
   };
 
   const $ = (sel, el = document) => el.querySelector(sel);
   const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
+
+  function syncAmountFieldForType(amountEl, type, hintEl) {
+    if (!amountEl) return;
+    const isBal = type === "balance";
+    if (isBal) amountEl.removeAttribute("min");
+    else amountEl.min = "0.01";
+    if (hintEl) hintEl.hidden = !isBal;
+  }
 
   /** Inline help icon HTML for dynamic sections */
   function helpBtn(text) {
@@ -122,6 +131,16 @@
     const m = String(dt.getMonth() + 1).padStart(2, "0");
     const day = String(dt.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
+  }
+
+  const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+  function onWeekdayFrom(iso, weekday) {
+    const from = iso ? new Date(`${iso}T12:00:00`) : new Date();
+    const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+    const wd = ((Number(weekday) % 7) + 7) % 7;
+    d.setDate(d.getDate() + ((wd - d.getDay() + 7) % 7));
+    return isoDate(d);
   }
 
   function daysBetween(fromIso, toIso) {
@@ -408,6 +427,8 @@
     if (name === "goals") refreshGoals();
     if (name === "cards") refreshCards();
     if (name === "spend") refreshSpend();
+    if (name === "loans") refreshLoans();
+    if (name === "food") refreshFood();
     if (name === "debts") refreshDebts();
     if (name === "invest") refreshInvestments();
     if (name === "settings") refreshSettings();
@@ -458,7 +479,8 @@
     }
     renderOnboarding(onboarding, hh);
     renderEmptyCoach(onboarding, cal, metrics);
-    renderSnapshot(snap, metrics);
+    renderSnapshot(snap, metrics, cal);
+    renderMustPay(cal);
     renderFocusStrip(cal, upcoming.items || [], snap, subs);
     renderStats(metrics, cal);
     renderThresholdBanner(cal);
@@ -592,7 +614,7 @@
         <h3>Quick tips</h3>
         <ul>
           <li><strong>Green act</strong> = money you know about (pay, actuals, paid bills).</li>
-          <li><strong>Orange est</strong> = full plan including unpaid bills and estimates.</li>
+          <li><strong>Orange est</strong> includes unpaid bills and estimates (the rest of the plan).</li>
           <li>Log a <strong>bank balance</strong> on any day to reset totals to real life.</li>
           <li>Set a <strong>safety amount</strong> under Household so low days stand out.</li>
         </ul>
@@ -867,10 +889,17 @@
     }
   }
 
-  function renderSnapshot(s, m) {
+  function renderSnapshot(s, m, cal) {
     const el = $("#snapshot-hero");
     if (!el) return;
-    const nwCls = s.net_worth >= 0 ? "positive" : "negative";
+    const cashAtEnd = cal
+      ? Number(
+          cal.ending_balance_est ?? cal.ending_balance ?? s.cash ?? 0
+        )
+      : Number(s.cash || 0);
+    const nw =
+      cashAtEnd + Number(s.investments_total || 0) - Number(s.debts_total || 0);
+    const nwCls = nw >= 0 ? "positive" : "negative";
     const spent = m ? Number(m.month_expenses || 0) : 0;
     const got = m ? Number(m.month_income || 0) : 0;
     const monthNet = got - spent;
@@ -879,14 +908,14 @@
       .map((mm) => `<span>${escapeHtml(mm.display_name)}</span>`)
       .join("");
     el.innerHTML = `
-      <div class="snap-net">
-        <div class="stat-label">Simple net worth ${helpBtn("Rough big picture: cash + investments minus debts. Not a bank balance by itself — goals saved are tracked separately.")}</div>
-        <div class="stat-value ${nwCls}">${money(s.net_worth)}</div>
-        <div class="stat-hint">Cash + investments − debts</div>
+      <div class="snap-net ${nw >= 0 ? "is-ahead" : ""}">
+        <div class="stat-label">Simple net worth ${helpBtn("Follows the month on the calendar: planned cash at month end (pay and bills on the calendar) plus investments minus debts. Flip months to see it change. Goals saved are tracked separately.")}</div>
+        <div class="stat-value ${nwCls}">${money(nw)}</div>
+        <div class="stat-hint">This month’s planned cash + investments − debts</div>
         <div class="snap-members">${members || "<span>Household</span>"}</div>
       </div>
       <div class="stat">
-        <div class="stat-label">This month ${helpBtn("Spent / income for the month on the calendar. The number underneath is income minus spent (green if ahead, red if behind). Bank-balance snapshots are not counted as spending.")}</div>
+        <div class="stat-label">This month ${helpBtn("Spent / income for the month on the calendar. The number underneath is income minus spent. Bank-balance snapshots are not counted as spending.")}</div>
         <div class="stat-hint">Spent / income</div>
         <div class="stat-value snap-flow"><span class="negative">${money(spent)}</span><span class="snap-flow-sep"> / </span><span class="positive">${money(got)}</span></div>
         <div class="snap-tally ${monthNetCls}">${money(monthNet)}</div>
@@ -914,6 +943,86 @@
     el.querySelector("[data-go-goals]")?.addEventListener("click", (e) => {
       if (e.target.closest(".help-icon")) return;
       setView("goals");
+    });
+  }
+
+  function isMustPayItem(it) {
+    if (!it || it.is_income || it.item_type === "paycheck" || it.item_type === "balance") {
+      return false;
+    }
+    const cat = (it.category || "").toLowerCase();
+    const name = (it.name || "").toLowerCase();
+    if (name.startsWith("card min:")) return false;
+    const cats = ["housing", "electric", "water", "gas", "internet", "phone", "insurance"];
+    if (cats.some((c) => cat.includes(c))) return true;
+    const names = [
+      "mortgage",
+      "rent",
+      "electric",
+      "water",
+      "hoa",
+      "verizon",
+      "pennymac",
+      "dte",
+      "consumers energy",
+    ];
+    if (names.some((n) => name.includes(n))) return true;
+    if (name === "gas" || name.startsWith("gas ")) return true;
+    return false;
+  }
+
+  function renderMustPay(cal) {
+    const el = $("#must-pay");
+    if (!el) return;
+    const rows = [];
+    (cal.days || []).forEach((day) => {
+      (day.items || []).forEach((it) => {
+        if (isMustPayItem(it)) {
+          rows.push({ ...it, due_date: day.date });
+        }
+      });
+    });
+    rows.sort((a, b) => {
+      if (!!a.is_paid !== !!b.is_paid) return a.is_paid ? 1 : -1;
+      return String(a.due_date).localeCompare(String(b.due_date));
+    });
+    if (!rows.length) {
+      el.innerHTML = "";
+      el.style.display = "none";
+      return;
+    }
+    el.style.display = "";
+    const unpaid = rows.filter((r) => !r.is_paid);
+    const need = unpaid.reduce((s, r) => s + Number(r.amount || 0), 0);
+    el.innerHTML = `
+      <div class="must-pay-head">
+        <h2>Must pay this month
+          <button type="button" class="help-icon" data-help="Rent or mortgage, electric, water, gas, phone, insurance. Same bills as Recurring — listed here so the lights-on items are easy to see. Tap a row to open that day.">?</button>
+        </h2>
+        <div class="must-pay-need">${unpaid.length ? `${money(need)} still due` : "These are marked paid"}</div>
+      </div>
+      <div class="table-wrap must-pay-table">
+        <table class="data">
+          <thead><tr><th>Due</th><th>Bill</th><th class="num">Amount</th><th></th></tr></thead>
+          <tbody>
+            ${rows
+              .map((r) => {
+                const paid = r.is_paid
+                  ? `<span class="chip chip-success">Paid</span>`
+                  : `<span class="text-muted">Due</span>`;
+                return `<tr class="${r.is_paid ? "row-paid" : ""}" data-must-day="${r.due_date}" role="button">
+                  <td>${r.due_date.slice(5)}</td>
+                  <td>${escapeHtml(r.name)}</td>
+                  <td class="num">${money(r.amount)}</td>
+                  <td>${paid}</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>`;
+    el.querySelectorAll("[data-must-day]").forEach((tr) => {
+      tr.addEventListener("click", () => openDayExpand(tr.dataset.mustDay, true));
     });
   }
 
@@ -999,7 +1108,7 @@
       bankBody += `
         <p class="focus-empty">What does checking show today?</p>
         <form class="focus-bank-form" id="focus-bank-form">
-          <input id="focus-bank-amount" class="input-money" type="number" min="0.01" step="0.01" required placeholder="0.00" />
+          <input id="focus-bank-amount" class="input-money" type="number" step="0.01" required placeholder="0.00" />
           <button class="btn btn-primary btn-sm" type="submit">Save</button>
           <button class="btn btn-ghost btn-sm" type="button" id="focus-bank-skip">Not now</button>
         </form>`;
@@ -1078,7 +1187,7 @@
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
         const amt = parseFloat($("#focus-bank-amount").value);
-        if (!amt || amt <= 0) return;
+        if (!Number.isFinite(amt)) return;
         try {
           await api("/api/items", {
             method: "POST",
@@ -1119,14 +1228,14 @@
       },
       {
         label: "Confirmed, month end",
-        help: "Where cash sits at month end using only money that already moved: pay, bills you marked Paid, and imported bank lines. Unpaid bills (mortgage still due, electric not paid yet) do not come out of this number. A bank-balance entry on a day resets this from that amount forward.",
+        help: "Cash at month end using pay, bills marked Paid, and imported bank lines. Unpaid bills are not subtracted here. A bank-balance entry on a day restarts the count from that amount.",
         value: endAct,
         cls: endAct >= 0 ? "positive" : "negative",
         hint: "Pay + Paid only",
       },
       {
         label: "If everything is paid",
-        help: "Same month, but unpaid bills and estimates come out too — the “will I make it?” number. Use this to see overspending before you tap Paid.",
+        help: "Same month with remaining bills and estimates included, so you can see the rest of the plan before tapping Paid.",
         value: endEst,
         cls: endEst >= 0 ? "positive" : "negative",
         hint: "Includes unpaid bills",
@@ -1202,9 +1311,9 @@
       const warnClass = `${warnEst ? "warn-est" : ""} ${warnAct ? "warn-act" : ""}`.trim();
       let warnBadge = "";
       if (warnAct) {
-        warnBadge = `<span class="cal-warn-badge act" title="Confirmed balance at or below your safety amount">Low act</span>`;
+        warnBadge = `<span class="cal-warn-badge act" title="At or below your safety amount">Near safety</span>`;
       } else if (warnEst) {
-        warnBadge = `<span class="cal-warn-badge est" title="Planned balance at or below your safety amount">Low est</span>`;
+        warnBadge = `<span class="cal-warn-badge est" title="Plan is at or below your safety amount">Near safety</span>`;
       }
       const ariaWarn = warnAct
         ? " low confirmed balance"
@@ -1292,7 +1401,7 @@
       if (day.warn_actual) bits.push("confirmed (act)");
       if (day.warn_est) bits.push("planned (est)");
       sub =
-        `Below your safety amount of ${money(thr)} on ${bits.join(" and ")} balance. ` +
+        `At or below your safety amount of ${money(thr)} on ${bits.join(" and ")} balance. ` +
         sub;
     }
     $("#day-expand-sub").textContent = sub;
@@ -1426,7 +1535,7 @@
     $$(".cal-cell[data-date]").forEach((c) => c.classList.remove("selected"));
   }
 
-  function openEditItemModal(item) {
+  function openEditItemModal(item, opts = {}) {
     const modal = $("#edit-item-modal");
     if (!modal || !item) return;
     $("#edit-item-id").value = item.id;
@@ -1434,11 +1543,24 @@
     $("#edit-item-amount").value = item.amount;
     $("#edit-item-date").value = item.due_date;
     $("#edit-item-type").value = item.item_type || "bill";
+    syncAmountFieldForType(
+      $("#edit-item-amount"),
+      item.item_type || "bill",
+      $("#edit-item-amount-hint")
+    );
     $("#edit-item-freq").value = item.frequency || "once";
+    const editWdWrap = $("#edit-item-weekday-wrap");
+    const editWd = $("#edit-item-weekday");
+    if (editWdWrap) editWdWrap.hidden = (item.frequency || "once") !== "weekly";
+    if (editWd && item.due_date) {
+      editWd.value = String(new Date(`${item.due_date}T12:00:00`).getDay());
+    }
     $("#edit-item-notes").value = item.notes || "";
     $("#edit-item-category").value = item.category || "";
     const paid = $("#edit-item-paid");
     if (paid) paid.checked = !!item.is_paid;
+    const autoPay = $("#edit-item-autopay");
+    if (autoPay) autoPay.checked = !!item.auto_pay;
     const subBox = $("#edit-item-sub");
     if (subBox) subBox.checked = item.is_subscription === true;
     const paidRow = $("#edit-item-paid-row");
@@ -1452,8 +1574,9 @@
     if (scopeRow) {
       const repeating = isRecurringItem(item);
       scopeRow.hidden = !repeating;
-      const thisRadio = document.querySelector('input[name="edit-item-scope"][value="this"]');
-      if (thisRadio) thisRadio.checked = true;
+      const want = opts.defaultScope === "future" ? "future" : "this";
+      const radio = document.querySelector(`input[name="edit-item-scope"][value="${want}"]`);
+      if (radio) radio.checked = true;
     }
     modal.hidden = false;
   }
@@ -1598,6 +1721,12 @@
           responsive: true,
           maintainAspectRatio: false,
           layout: { padding: 4 },
+          onClick: (_evt, els, chart) => {
+            const i = els && els[0] && els[0].index;
+            if (i == null) return;
+            const label = chart.data.labels[i];
+            if (label && label !== "No expenses") showHomeCategory(label);
+          },
           plugins: {
             legend: {
               position: "bottom",
@@ -1606,6 +1735,10 @@
                 boxWidth: 10,
                 font: { size: 10 },
                 padding: 8,
+              },
+              onClick: (_e, item, legend) => {
+                const label = legend.chart.data.labels[item.index];
+                if (label && label !== "No expenses") showHomeCategory(label);
               },
             },
           },
@@ -1645,6 +1778,75 @@
         },
       });
     }
+  }
+
+  function itemCategoryName(it) {
+    return (it && (it.category || it.name)) || "Other";
+  }
+
+  function showHomeCategory(cat) {
+    const box = $("#spend-cat-detail");
+    if (!box) return;
+    const cal = state.calendar;
+    const rows = [];
+    (cal.days || []).forEach((day) => {
+      (day.items || []).forEach((it) => {
+        if (it.is_income || it.item_type === "balance") return;
+        if (itemCategoryName(it) === cat) {
+          rows.push({ ...it, due_date: day.date });
+        }
+      });
+    });
+    rows.sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+    const total = rows.reduce((s, r) => s + Number(r.amount || 0), 0);
+    const wrap = $("#chart-category-wrap");
+    const hint = $("#spend-cat-hint");
+    if (wrap) wrap.hidden = true;
+    if (hint) hint.hidden = true;
+    box.hidden = false;
+    box.innerHTML = `
+      <div class="must-pay-head">
+        <button class="btn btn-outline btn-sm" type="button" id="btn-cat-detail-back">← Back</button>
+        <h3 style="margin:0;font-size:0.95rem">${escapeHtml(cat)}</h3>
+        <div class="must-pay-need">${rows.length} · ${money(total)}</div>
+      </div>
+      ${
+        rows.length
+          ? `<div class="spend-cat-detail-scroll"><div class="table-wrap" style="border:none"><table class="data">
+              <thead><tr><th>Date</th><th>Name</th><th class="num">Amount</th></tr></thead>
+              <tbody>${rows
+                .map(
+                  (r) => `<tr data-cat-day="${r.due_date}" role="button">
+                    <td>${r.due_date.slice(5)}</td>
+                    <td>${escapeHtml(r.name)}</td>
+                    <td class="num">${money(r.amount)}</td>
+                  </tr>`
+                )
+                .join("")}</tbody>
+            </table></div></div>`
+          : `<p class="form-hint">Nothing in this month for ${escapeHtml(cat)}.</p>`
+      }
+      <div class="goal-actions" style="margin-top:0.5rem">
+        <button class="btn btn-outline btn-sm" type="button" id="btn-cat-to-spend">See on Spend tab</button>
+      </div>`;
+    box.querySelectorAll("[data-cat-day]").forEach((tr) => {
+      tr.addEventListener("click", () => openDayExpand(tr.dataset.catDay, true));
+    });
+    const go = $("#btn-cat-to-spend");
+    if (go) {
+      go.addEventListener("click", () => {
+        state.spendCatFilter = cat;
+        setView("spend");
+      });
+    }
+    const back = () => {
+      box.hidden = true;
+      box.innerHTML = "";
+      if (wrap) wrap.hidden = false;
+      if (hint) hint.hidden = false;
+    };
+    const backBtn = $("#btn-cat-detail-back");
+    if (backBtn) backBtn.addEventListener("click", back);
   }
 
   function destroyChart(key) {
@@ -1833,6 +2035,15 @@
     });
   }
 
+  function recDueFromDay(baseIso, dueDay) {
+    const parts = String(baseIso || isoDate()).split("-");
+    const y = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10);
+    const last = new Date(y, m, 0).getDate();
+    const day = Math.min(Math.max(parseInt(dueDay, 10) || 1, 1), last);
+    return `${parts[0]}-${parts[1]}-${String(day).padStart(2, "0")}`;
+  }
+
   async function refreshRecurring() {
     const data = await api("/api/recurring");
     const box = $("#recurring-list");
@@ -1853,6 +2064,7 @@
               <th>Due day</th>
               <th class="num">This month $</th>
               <th class="num">Usual $</th>
+              <th>Auto-pay</th>
               <th></th>
             </tr>
           </thead>
@@ -1865,13 +2077,9 @@
                   : `<span class="text-muted">—</span>`;
                 const actions = viewer
                   ? ""
-                  : `${
-                      r.this_month_id
-                        ? `<button class="btn btn-outline btn-sm" type="button" data-rec-save-this="${r.this_month_id}">This month</button> `
-                        : ""
-                    }<button class="btn btn-primary btn-sm" type="button" data-rec-save-later="${r.next_id}">Usual</button>
+                  : `<button class="btn btn-outline btn-sm" type="button" data-rec-edit="${r.id}">Edit</button>
                     <button class="btn btn-ghost btn-sm" type="button" data-rec-stop="${r.next_id}">Stop</button>`;
-                return `<tr data-rec-row="${r.next_id}" data-this-id="${r.this_month_id || ""}" data-this-date="${r.this_month_date || ""}">
+                return `<tr data-rec-row="${r.next_id}" data-rec-id="${r.id}" data-this-id="${r.this_month_id || ""}" data-this-date="${r.this_month_date || ""}">
                   <td>${
                     viewer
                       ? escapeHtml(r.name)
@@ -1889,6 +2097,13 @@
                       ? money(r.typical_amount)
                       : `<input class="input-money" data-rec-typical="${r.next_id}" type="number" min="0.01" step="0.01" value="${r.typical_amount}" style="width:6.5rem" />`
                   }</td>
+                  <td>${
+                    viewer
+                      ? r.auto_pay
+                        ? "Yes"
+                        : ""
+                      : `<input type="checkbox" data-rec-autopay="${r.next_id}" ${r.auto_pay ? "checked" : ""} title="Mark Paid on the due date" />`
+                  }</td>
                   <td class="day-actions">${actions}</td>
                 </tr>`;
               })
@@ -1896,56 +2111,80 @@
           </tbody>
         </table>
       </div>
-      <p class="form-hint" style="margin-top:0.65rem">This month = water/electric this cycle only. Usual = later months. Stop ends the repeat from the next date.</p>`;
-    box.querySelectorAll("[data-rec-save-this]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.recSaveThis;
-        const tr = btn.closest("tr");
-        const input = box.querySelector(`[data-rec-this="${id}"]`);
-        const amt = parseFloat(input && input.value);
-        if (!amt || amt <= 0) return;
-        const payload = { amount: amt };
-        const thisDate = (tr && tr.dataset.thisDate) || "";
-        const dayEl = tr && tr.querySelector("[data-rec-day]");
-        const dueDay = parseInt(dayEl && dayEl.value, 10);
-        if (thisDate && dueDay) {
-          const parts = String(thisDate).split("-");
-          const last = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10), 0).getDate();
-          const day = Math.min(Math.max(dueDay, 1), last);
-          payload.due_date = `${parts[0]}-${parts[1]}-${String(day).padStart(2, "0")}`;
-        }
+      <p class="form-hint" style="margin-top:0.65rem">Edit opens the full form (this month or later months). Change a name or amount in the table and click outside the box to save. Stop ends the repeat from the next date.</p>`;
+
+    async function saveThisMonth(id) {
+      const tr = box.querySelector(`[data-rec-this="${id}"]`)?.closest("tr");
+      const input = box.querySelector(`[data-rec-this="${id}"]`);
+      const amt = parseFloat(input && input.value);
+      if (!Number.isFinite(amt) || amt <= 0) return;
+      const payload = { amount: amt };
+      const thisDate = (tr && tr.dataset.thisDate) || "";
+      const dayEl = tr && tr.querySelector("[data-rec-day]");
+      if (thisDate && dayEl) payload.due_date = recDueFromDay(thisDate, dayEl.value);
+      await api(`/api/items/${id}?scope=this`, { method: "PATCH", json: payload });
+      await refreshDashboard().catch(() => {});
+    }
+
+    async function saveUsual(id) {
+      const rec = items.find((x) => String(x.next_id) === String(id));
+      const nameEl = box.querySelector(`[data-rec-name="${id}"]`);
+      const typicalEl = box.querySelector(`[data-rec-typical="${id}"]`);
+      const dayEl = box.querySelector(`[data-rec-day="${id}"]`);
+      const name = (nameEl && nameEl.value.trim()) || (rec && rec.name) || "";
+      const typical = parseFloat(typicalEl && typicalEl.value);
+      if (!Number.isFinite(typical) || typical <= 0) return;
+      const base = rec && rec.next_date ? rec.next_date : isoDate();
+      const due = recDueFromDay(base, dayEl && dayEl.value);
+      const autoEl = box.querySelector(`[data-rec-autopay="${id}"]`);
+      await api(`/api/items/${id}?scope=future`, {
+        method: "PATCH",
+        json: {
+          name,
+          amount: typical,
+          due_date: due,
+          auto_pay: !!(autoEl && autoEl.checked),
+        },
+      });
+      await refreshDashboard().catch(() => {});
+    }
+
+    box.querySelectorAll("[data-rec-this]").forEach((el) => {
+      el.addEventListener("change", async () => {
         try {
-          await api(`/api/items/${id}?scope=this`, { method: "PATCH", json: payload });
-          await refreshRecurring();
-          await refreshDashboard().catch(() => {});
+          await saveThisMonth(el.dataset.recThis);
         } catch (ex) {
           alert(ex.message);
         }
       });
     });
-    box.querySelectorAll("[data-rec-save-later]").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const id = btn.dataset.recSaveLater;
-        const rec = items.find((x) => String(x.next_id) === String(id));
-        const nameEl = box.querySelector(`[data-rec-name="${id}"]`);
-        const typicalEl = box.querySelector(`[data-rec-typical="${id}"]`);
-        const dayEl = box.querySelector(`[data-rec-day="${id}"]`);
-        const name = (nameEl && nameEl.value.trim()) || (rec && rec.name) || "";
-        const typical = parseFloat(typicalEl && typicalEl.value);
-        const dueDay = parseInt(dayEl && dayEl.value, 10);
-        const base = rec && rec.next_date ? rec.next_date : isoDate();
-        const parts = String(base).split("-");
-        const y = parseInt(parts[0], 10);
-        const m = parseInt(parts[1], 10);
-        const last = new Date(y, m, 0).getDate();
-        const day = Math.min(Math.max(dueDay || 1, 1), last);
-        const due = `${parts[0]}-${parts[1]}-${String(day).padStart(2, "0")}`;
+    box.querySelectorAll("[data-rec-name], [data-rec-typical], [data-rec-day]").forEach((el) => {
+      el.addEventListener("change", async () => {
+        const id = el.dataset.recName || el.dataset.recTypical || el.dataset.recDay;
         try {
-          await api(`/api/items/${id}?scope=future`, {
+          await saveUsual(id);
+        } catch (ex) {
+          alert(ex.message);
+        }
+      });
+    });
+    box.querySelectorAll("[data-rec-edit]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const item = await api(`/api/items/${btn.dataset.recEdit}`);
+          openEditItemModal(item, { defaultScope: "future" });
+        } catch (ex) {
+          alert(ex.message || "Could not open this bill");
+        }
+      });
+    });
+    box.querySelectorAll("[data-rec-autopay]").forEach((cb) => {
+      cb.addEventListener("change", async () => {
+        try {
+          await api(`/api/items/${cb.dataset.recAutopay}?scope=future`, {
             method: "PATCH",
-            json: { name, amount: typical, due_date: due },
+            json: { auto_pay: !!cb.checked },
           });
-          await refreshRecurring();
           await refreshDashboard().catch(() => {});
         } catch (ex) {
           alert(ex.message);
@@ -1957,6 +2196,205 @@
         if (!confirm("Stop this repeating bill from the next date onward? Past months stay.")) return;
         await api(`/api/items/${btn.dataset.recStop}?scope=future`, { method: "DELETE" });
         await refreshRecurring();
+        await refreshDashboard().catch(() => {});
+      });
+    });
+  }
+
+  function loanDueClass(due) {
+    if (!due) return "";
+    const n = daysBetween(isoDate(), due);
+    if (n <= 0) return "loan-due-today";
+    if (n <= 7) return "loan-due-soon";
+    return "";
+  }
+
+  function loanDueLabel(due) {
+    if (!due) return "No date";
+    const n = daysBetween(isoDate(), due);
+    if (n < 0) return `${-n} day${-n === 1 ? "" : "s"} ago`;
+    if (n === 0) return "Due today";
+    return `In ${n} day${n === 1 ? "" : "s"}`;
+  }
+
+  async function refreshLoans() {
+    const debts = await api("/api/debts");
+    const loans = (debts || []).filter((d) => d.kind === "payday" || d.kind === "loan");
+    const active = loans.filter((d) => Number(d.balance) > 0.005);
+    const total = active.reduce((s, d) => s + Number(d.balance || 0), 0);
+    const payday = active.filter((d) => d.kind === "payday").length;
+    const sum = $("#loans-summary");
+    if (sum) {
+      sum.innerHTML = `
+        <div class="stat"><div class="stat-label">Still owe</div><div class="stat-value negative">${money(total)}</div><div class="stat-hint">${active.length} open loan${active.length === 1 ? "" : "s"}</div></div>
+        <div class="stat"><div class="stat-label">Payday</div><div class="stat-value">${payday}</div><div class="stat-hint">Due on a date, not a card</div></div>`;
+    }
+    const box = $("#loans-list");
+    if (!box) return;
+    if (!loans.length) {
+      box.innerHTML = `<div class="empty"><h3>No loans listed</h3><p>Add a payday loan or car/personal loan above. Amount due and the date go on the calendar with the other bills.</p></div>`;
+      return;
+    }
+    const viewer = isViewer();
+    const kindLabel = (k) => (k === "payday" ? "Payday" : "Loan");
+    box.innerHTML = `
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th class="num">Amount due</th>
+              <th>Due</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${loans
+              .map((d) => {
+                const dueCls = loanDueClass(d.due_date);
+                const actions = viewer
+                  ? ""
+                  : `${
+                      Number(d.balance) > 0.005
+                        ? `<button class="btn btn-outline btn-sm" type="button" data-loan-paid="${d.id}">Paid</button>
+                    <button class="btn btn-ghost btn-sm" type="button" data-loan-cal="${d.id}">Calendar</button>`
+                        : ""
+                    }
+                    <button class="btn btn-ghost btn-sm" type="button" data-loan-del="${d.id}">Remove</button>`;
+                return `<tr>
+                  <td>${escapeHtml(d.name)}${Number(d.balance) <= 0.005 ? ` <span class="chip chip-success">paid</span>` : ""}</td>
+                  <td><span class="chip">${kindLabel(d.kind)}</span></td>
+                  <td class="num">${money(d.balance)}</td>
+                  <td class="${dueCls}">${d.due_date || "—"}<div class="form-hint" style="margin:0">${loanDueLabel(d.due_date)}</div></td>
+                  <td class="day-actions">${actions}</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+      <p class="form-hint" style="margin-top:0.65rem">Paid marks the loan and the calendar bill. Amount still counts in net worth until it is paid.</p>`;
+    box.querySelectorAll("[data-loan-paid]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Mark this loan paid?")) return;
+        try {
+          await api(`/api/debts/${btn.dataset.loanPaid}/paid`, { method: "POST" });
+          await refreshLoans();
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          alert(ex.message);
+        }
+      });
+    });
+    box.querySelectorAll("[data-loan-cal]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const data = await api(`/api/debts/${btn.dataset.loanCal}/to-calendar`, { method: "POST" });
+          alert(data.message || "On the calendar.");
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          alert(ex.message);
+        }
+      });
+    });
+    box.querySelectorAll("[data-loan-del]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Remove this loan?")) return;
+        await api(`/api/debts/${btn.dataset.loanDel}`, { method: "DELETE" });
+        await refreshLoans();
+        await refreshDashboard().catch(() => {});
+      });
+    });
+  }
+
+  function isFoodAssistance(r) {
+    const cat = String(r.category || "").toLowerCase();
+    const name = String(r.name || "").toLowerCase();
+    return (
+      cat === "food assistance" ||
+      name.includes("food assistance") ||
+      name.includes("snap") ||
+      name.includes("ebt") ||
+      name.includes("wic") ||
+      name.includes("food stamp")
+    );
+  }
+
+  async function refreshFood() {
+    const data = await api("/api/recurring");
+    const items = (data.items || []).filter(isFoodAssistance);
+    const thisMo = items.reduce(
+      (s, r) => s + Number(r.this_month_amount != null ? r.this_month_amount : r.typical_amount || 0),
+      0
+    );
+    const sum = $("#food-summary");
+    if (sum) {
+      sum.innerHTML = `
+        <div class="stat"><div class="stat-label">This month</div><div class="stat-value">${money(thisMo)}</div><div class="stat-hint">${items.length} food line${items.length === 1 ? "" : "s"}</div></div>`;
+    }
+    const box = $("#food-list");
+    if (!box) return;
+    if (!items.length) {
+      box.innerHTML = `<div class="empty"><h3>No food assistance yet</h3><p>Add SNAP / EBT on a day of the month, or a grocery plan every Friday.</p></div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>When</th>
+              <th class="num">This month $</th>
+              <th class="num">Usual $</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items
+              .map((r) => {
+                const weeklyWhen =
+                  r.frequency === "weekly" && r.next_date
+                    ? `Every ${WEEKDAY_NAMES[new Date(`${r.next_date}T12:00:00`).getDay()]}`
+                    : r.frequency === "weekly"
+                    ? "Every week"
+                    : `Day ${r.due_day}`;
+                return `<tr>
+                  <td>${escapeHtml(r.name)}</td>
+                  <td><span class="chip chip-${typeChip(r)}">${escapeHtml(r.item_type)}</span></td>
+                  <td>${weeklyWhen}</td>
+                  <td class="num">${r.this_month_amount != null ? money(r.this_month_amount) : "—"}</td>
+                  <td class="num">${money(r.typical_amount)}</td>
+                  <td class="day-actions">${
+                    isViewer()
+                      ? ""
+                      : `<button class="btn btn-outline btn-sm" type="button" data-food-edit="${r.id}">Edit</button>
+                    <button class="btn btn-ghost btn-sm" type="button" data-food-stop="${r.next_id}">Stop</button>`
+                  }</td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+      <p class="form-hint" style="margin-top:0.65rem">Edit opens the same form as Recurring. Change this month vs later months there.</p>`;
+    box.querySelectorAll("[data-food-edit]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        try {
+          const item = await api(`/api/items/${btn.dataset.foodEdit}`);
+          openEditItemModal(item, { defaultScope: "future" });
+        } catch (ex) {
+          alert(ex.message || "Could not open this item");
+        }
+      });
+    });
+    box.querySelectorAll("[data-food-stop]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Stop this from the next date onward? Past months stay.")) return;
+        await api(`/api/items/${btn.dataset.foodStop}?scope=future`, { method: "DELETE" });
+        await refreshFood();
         await refreshDashboard().catch(() => {});
       });
     });
@@ -2696,6 +3134,13 @@
 
   async function refreshSpend() {
     const data = await api("/api/cards/spend");
+    state.spendData = data;
+    renderSpendView();
+  }
+
+  function renderSpendView() {
+    const data = state.spendData || {};
+    const filter = (state.spendCatFilter || "").trim();
     const sum = $("#spend-summary");
     if (sum) {
       sum.innerHTML = `
@@ -2709,7 +3154,7 @@
       catBody.innerHTML = rows.length
         ? rows
             .map(
-              (c) => `<tr>
+              (c) => `<tr data-spend-cat="${escapeAttr(c.category)}" role="button" class="${filter === c.category ? "row-paid" : ""}">
                 <td>${escapeHtml(c.category)}</td>
                 <td class="num">${c.count}</td>
                 <td class="num">${money(c.amount)}</td>
@@ -2718,6 +3163,13 @@
             )
             .join("")
         : `<tr><td colspan="4" class="text-muted">Upload card PDFs under Cards first.</td></tr>`;
+      catBody.querySelectorAll("[data-spend-cat]").forEach((tr) => {
+        tr.addEventListener("click", () => {
+          state.spendCatFilter =
+            state.spendCatFilter === tr.dataset.spendCat ? "" : tr.dataset.spendCat;
+          renderSpendView();
+        });
+      });
     }
     const cardBody = $("#spend-card-table tbody");
     if (cardBody) {
@@ -2737,7 +3189,8 @@
     }
     const merchBody = $("#spend-merch-table tbody");
     if (merchBody) {
-      const rows = data.merchants || [];
+      let rows = data.merchants || [];
+      if (filter) rows = rows.filter((m) => m.category === filter);
       merchBody.innerHTML = rows.length
         ? rows
             .map(
@@ -2750,7 +3203,29 @@
               </tr>`
             )
             .join("")
-        : `<tr><td colspan="5" class="text-muted">No merchants yet.</td></tr>`;
+        : `<tr><td colspan="5" class="text-muted">${filter ? `No merchants in ${escapeHtml(filter)}.` : "No merchants yet."}</td></tr>`;
+    }
+    let filterBar = $("#spend-filter-bar");
+    if (!filterBar) {
+      const host = $("#spend-cat-table");
+      if (host && host.parentElement) {
+        filterBar = document.createElement("p");
+        filterBar.id = "spend-filter-bar";
+        filterBar.className = "form-hint";
+        host.parentElement.insertBefore(filterBar, host);
+      }
+    }
+    if (filterBar) {
+      filterBar.innerHTML = filter
+        ? `Showing <strong>${escapeHtml(filter)}</strong>. <button type="button" class="btn btn-ghost btn-sm" id="btn-spend-clear">Show all</button>`
+        : "Tap a category (or a pie slice) to filter merchants.";
+      const clr = $("#btn-spend-clear");
+      if (clr) {
+        clr.addEventListener("click", () => {
+          state.spendCatFilter = "";
+          renderSpendView();
+        });
+      }
     }
     if (typeof Chart !== "undefined") {
       const catLabels = (data.by_category || []).map((c) => c.category);
@@ -2769,7 +3244,26 @@
             labels: catLabels,
             datasets: [{ data: catVals, backgroundColor: catLabels.map((_, i) => palette[i % palette.length]) }],
           },
-          options: { plugins: { legend: { position: "bottom", labels: { color: "#8b949e", boxWidth: 12 } } } },
+          options: {
+            onClick: (_evt, els, chart) => {
+              const i = els && els[0] && els[0].index;
+              if (i == null) return;
+              const label = chart.data.labels[i];
+              state.spendCatFilter = state.spendCatFilter === label ? "" : label;
+              renderSpendView();
+            },
+            plugins: {
+              legend: {
+                position: "bottom",
+                labels: { color: "#8b949e", boxWidth: 12 },
+                onClick: (_e, item, legend) => {
+                  const label = legend.chart.data.labels[item.index];
+                  state.spendCatFilter = state.spendCatFilter === label ? "" : label;
+                  renderSpendView();
+                },
+              },
+            },
+          },
         });
       }
       if (cardEl && cardLabels.length) {
@@ -3810,18 +4304,24 @@
         try {
           const itemType = $("#edit-item-type").value;
           const scope = editScopeValue();
+          const freq = itemType === "balance" ? "once" : $("#edit-item-freq").value;
+          let due = $("#edit-item-date").value;
+          if (freq === "weekly" && $("#edit-item-weekday")) {
+            due = onWeekdayFrom(due || isoDate(), $("#edit-item-weekday").value);
+          }
           await api(`/api/items/${id}?scope=${encodeURIComponent(scope)}`, {
             method: "PATCH",
             json: {
               name: $("#edit-item-name").value.trim(),
               amount: parseFloat($("#edit-item-amount").value),
-              due_date: $("#edit-item-date").value,
+              due_date: due,
               item_type: itemType,
-              frequency: itemType === "balance" ? "once" : $("#edit-item-freq").value,
+              frequency: freq,
               notes: $("#edit-item-notes").value,
               category: $("#edit-item-category").value,
               is_income: itemType === "paycheck",
               is_paid: !!$("#edit-item-paid")?.checked,
+              auto_pay: !!$("#edit-item-autopay")?.checked,
               is_subscription: !!$("#edit-item-sub")?.checked,
             },
           });
@@ -3829,10 +4329,31 @@
           closeEditItemModal();
           await refreshDashboard();
           await refreshInput().catch(() => {});
+          await refreshRecurring().catch(() => {});
+          await refreshFood().catch(() => {});
         } catch (ex) {
           if (msg) msg.textContent = ex.message;
           else alert(ex.message);
         }
+      });
+    }
+    const editFreq = $("#edit-item-freq");
+    if (editFreq) {
+      editFreq.addEventListener("change", () => {
+        const wrap = $("#edit-item-weekday-wrap");
+        if (wrap) wrap.hidden = editFreq.value !== "weekly";
+        if (editFreq.value === "weekly") {
+          const dateEl = $("#edit-item-date");
+          const wdEl = $("#edit-item-weekday");
+          if (dateEl && wdEl) dateEl.value = onWeekdayFrom(dateEl.value || isoDate(), wdEl.value);
+        }
+      });
+    }
+    const editWd = $("#edit-item-weekday");
+    if (editWd) {
+      editWd.addEventListener("change", () => {
+        const dateEl = $("#edit-item-date");
+        if (dateEl) dateEl.value = onWeekdayFrom(dateEl.value || isoDate(), editWd.value);
       });
     }
     const editCancel = $("#edit-item-cancel");
@@ -3917,6 +4438,8 @@
       }
       freqEl.disabled = false;
       const f = freqEl.value;
+      const wdWrap = $("#item-weekday-wrap");
+      if (wdWrap) wdWrap.hidden = f !== "weekly";
       if (f === "monthly") {
         hint.textContent =
           "Same day each month (like rent). Later months fill in by themselves.";
@@ -3926,6 +4449,13 @@
       } else if (f === "biweekly") {
         hint.textContent =
           "Every 2 weeks (like many paychecks). Later months fill in by themselves.";
+      } else if (f === "weekly") {
+        hint.textContent = "Every week on that day (Friday groceries, a weekly bill).";
+        const dateEl = $("#item-date");
+        const wdEl = $("#item-weekday");
+        if (dateEl && wdEl) {
+          dateEl.value = onWeekdayFrom(dateEl.value || isoDate(), wdEl.value);
+        }
       } else {
         hint.textContent = "Only the date you pick — nothing repeats.";
       }
@@ -3939,10 +4469,33 @@
       if ((t === "bill" || t === "estimate") && freq && freq.value === "once") {
         freq.value = "monthly";
       }
+      syncAmountFieldForType($("#item-amount"), t, $("#item-amount-hint"));
       updateItemFreqHint();
     });
+    const editType = $("#edit-item-type");
+    if (editType) {
+      editType.addEventListener("change", () => {
+        syncAmountFieldForType(
+          $("#edit-item-amount"),
+          editType.value,
+          $("#edit-item-amount-hint")
+        );
+      });
+    }
+    syncAmountFieldForType(
+      $("#item-amount"),
+      $("#item-type") ? $("#item-type").value : "bill",
+      $("#item-amount-hint")
+    );
     const itemFreq = $("#item-freq");
     if (itemFreq) itemFreq.addEventListener("change", updateItemFreqHint);
+    const itemWd = $("#item-weekday");
+    if (itemWd) {
+      itemWd.addEventListener("change", () => {
+        const dateEl = $("#item-date");
+        if (dateEl) dateEl.value = onWeekdayFrom(dateEl.value || isoDate(), itemWd.value);
+      });
+    }
     updateItemFreqHint();
 
     $("#item-form").addEventListener("submit", async (e) => {
@@ -3961,6 +4514,11 @@
           name = $("#item-name-custom").value.trim() || "Bank balance";
         }
         const freq = itemType === "balance" ? "once" : $("#item-freq").value;
+        let due = $("#item-date").value;
+        if (freq === "weekly") {
+          const wd = $("#item-weekday") ? $("#item-weekday").value : "5";
+          due = onWeekdayFrom(due || isoDate(), wd);
+        }
         await api("/api/items", {
           method: "POST",
           json: {
@@ -3968,12 +4526,13 @@
             item_type: itemType,
             amount: parseFloat($("#item-amount").value),
             is_income: itemType === "paycheck",
-            due_date: $("#item-date").value,
+            due_date: due,
             frequency: freq,
             notes: $("#item-notes").value,
             category: itemType === "balance" ? "Balance" : $("#item-category").value,
             retain_name: $("#item-retain").checked,
             is_subscription: !!$("#item-sub")?.checked,
+            auto_pay: !!$("#item-autopay")?.checked,
           },
         });
         if (itemType === "balance") {
@@ -3983,6 +4542,8 @@
           msg.textContent = "Saved. It will keep showing up on that day each month.";
         } else if (freq === "biweekly") {
           msg.textContent = "Saved. It will keep showing up every 2 weeks.";
+        } else if (freq === "weekly") {
+          msg.textContent = "Saved. It will keep showing up every week on that day.";
         } else {
           msg.textContent = "Saved.";
         }
@@ -4364,6 +4925,115 @@
       });
     }
 
+    const recAddFreq = $("#rec-add-freq");
+    if (recAddFreq) {
+      recAddFreq.addEventListener("change", () => {
+        const wrap = $("#rec-add-weekday-wrap");
+        if (wrap) wrap.hidden = recAddFreq.value !== "weekly";
+      });
+    }
+
+    function syncLoanExtraFields() {
+      const extra = $("#loan-extra-fields");
+      const kind = $("#loan-kind");
+      if (extra && kind) extra.hidden = kind.value === "payday";
+    }
+    const loanKind = $("#loan-kind");
+    if (loanKind) loanKind.addEventListener("change", syncLoanExtraFields);
+    syncLoanExtraFields();
+
+    const loanForm = $("#loan-form");
+    if (loanForm) {
+      loanForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = $("#loan-form-msg");
+        const kind = ($("#loan-kind")?.value || "payday");
+        const amt = parseFloat($("#loan-amount").value);
+        const minRaw = parseFloat($("#loan-min")?.value);
+        const minPay = kind === "payday" ? amt : Number.isFinite(minRaw) && minRaw > 0 ? minRaw : amt;
+        try {
+          await api("/api/debts", {
+            method: "POST",
+            json: {
+              name: $("#loan-name").value.trim(),
+              balance: amt,
+              apr: parseFloat($("#loan-apr")?.value) || 0,
+              min_payment: minPay,
+              due_date: $("#loan-due").value,
+              notes: ($("#loan-notes")?.value || "").trim(),
+              kind,
+              put_min_on_calendar: !!$("#loan-cal")?.checked,
+            },
+          });
+          if (msg) msg.textContent = "Loan saved.";
+          loanForm.reset();
+          if ($("#loan-kind")) $("#loan-kind").value = "payday";
+          if ($("#loan-cal")) $("#loan-cal").checked = true;
+          if ($("#loan-apr")) $("#loan-apr").value = "0";
+          syncLoanExtraFields();
+          await refreshLoans();
+          await refreshDebts().catch(() => {});
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message;
+        }
+      });
+    }
+
+    function syncFoodSchedule() {
+      const freq = $("#food-freq")?.value || "monthly";
+      const dayWrap = $("#food-day-wrap");
+      const wdWrap = $("#food-weekday-wrap");
+      if (dayWrap) dayWrap.hidden = freq !== "monthly";
+      if (wdWrap) wdWrap.hidden = freq !== "weekly";
+    }
+    const foodFreq = $("#food-freq");
+    if (foodFreq) foodFreq.addEventListener("change", syncFoodSchedule);
+    syncFoodSchedule();
+
+    const foodForm = $("#food-form");
+    if (foodForm) {
+      foodForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const msg = $("#food-form-msg");
+        const freq = $("#food-freq")?.value || "monthly";
+        const t = new Date();
+        let dueStr;
+        if (freq === "weekly") {
+          dueStr = onWeekdayFrom(isoDate(t), $("#food-weekday")?.value || "5");
+        } else {
+          const day = parseInt($("#food-day").value, 10) || 1;
+          const last = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+          const d = Math.min(Math.max(day, 1), last);
+          const due = new Date(t.getFullYear(), t.getMonth(), d);
+          dueStr = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`;
+        }
+        const itemType = $("#food-kind")?.value || "paycheck";
+        try {
+          await api("/api/items", {
+            method: "POST",
+            json: {
+              name: $("#food-name").value.trim() || "Food assistance",
+              item_type: itemType,
+              amount: parseFloat($("#food-amount").value),
+              due_date: dueStr,
+              frequency: freq,
+              is_income: itemType === "paycheck",
+              category: "Food assistance",
+              retain_name: true,
+            },
+          });
+          if (msg) msg.textContent = "Added to the calendar.";
+          $("#food-amount").value = "";
+          await refreshFood();
+          await refreshRecurring().catch(() => {});
+          await refreshDashboard().catch(() => {});
+        } catch (ex) {
+          if (msg) msg.textContent = ex.message;
+        }
+      });
+    }
+
     const recAdd = $("#recurring-add-form");
     if (recAdd) {
       recAdd.addEventListener("submit", async (e) => {
@@ -4378,6 +5048,8 @@
           const d = Math.min(Math.max(day, 1), last);
           const due = new Date(t.getFullYear(), t.getMonth(), d);
           dueStr = `${due.getFullYear()}-${String(due.getMonth() + 1).padStart(2, "0")}-${String(due.getDate()).padStart(2, "0")}`;
+        } else if (freq === "weekly") {
+          dueStr = onWeekdayFrom(dueStr || isoDate(t), $("#rec-add-weekday")?.value || "5");
         } else if (!dueStr) {
           dueStr = isoDate(t);
         }
@@ -4392,6 +5064,7 @@
               frequency: freq,
               is_income: ($("#rec-add-type").value || "") === "paycheck",
               retain_name: true,
+              auto_pay: !!$("#rec-add-autopay")?.checked,
             },
           });
           if (msg) msg.textContent = "Added.";

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date as Date
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 ItemType = Literal["bill", "estimate", "paycheck", "actual", "balance"]
@@ -88,6 +88,7 @@ class BudgetItemOut(BaseModel):
     frequency: str
     notes: str
     is_paid: bool
+    auto_pay: bool = False
     category: str
     is_subscription: Optional[bool] = None
 
@@ -98,15 +99,25 @@ class BudgetItemOut(BaseModel):
 class BudgetItemCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     item_type: ItemType = "bill"
-    amount: float = Field(gt=0)
+    amount: float
     is_income: bool = False
     due_date: Date
     frequency: Frequency = "once"
     notes: str = ""
     is_paid: bool = False
+    auto_pay: bool = False
     category: str = ""
     retain_name: bool = True
     is_subscription: Optional[bool] = None
+
+    @model_validator(mode="after")
+    def amount_matches_type(self):
+        # Bank balance is a snapshot of cash that day — overdraft (negative) and $0 are valid.
+        if self.item_type == "balance":
+            return self
+        if self.amount <= 0:
+            raise ValueError("Amount must be greater than 0")
+        return self
 
 
 class BudgetItemUpdate(BaseModel):
@@ -118,6 +129,7 @@ class BudgetItemUpdate(BaseModel):
     frequency: Optional[Frequency] = None
     notes: Optional[str] = None
     is_paid: Optional[bool] = None
+    auto_pay: Optional[bool] = None
     category: Optional[str] = None
     is_subscription: Optional[bool] = None
 

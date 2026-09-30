@@ -96,6 +96,7 @@ def simulate_debt_paydown(
                 "balance": bal,
                 "apr": max(float(d.get("apr") or 0), 0.0),
                 "min_payment": max(float(d.get("min_payment") or 0), 0.0),
+                "kind": str(d.get("kind") or "card"),
             }
         )
 
@@ -224,8 +225,11 @@ def simulate_debt_paydown(
 def _pick_target(active: list[dict], strategy: str) -> dict:
     if strategy == "snowball":
         return sorted(active, key=lambda b: (b["balance"], -b["apr"], b["name"]))[0]
-    # avalanche default
-    return sorted(active, key=lambda b: (-b["apr"], b["balance"], b["name"]))[0]
+    # Payday loans first (short due), then highest APR.
+    return sorted(
+        active,
+        key=lambda b: (0 if b.get("kind") == "payday" else 1, -b["apr"], b["balance"], b["name"]),
+    )[0]
 
 
 def _label(strategy: str) -> str:
